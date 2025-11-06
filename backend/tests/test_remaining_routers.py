@@ -430,3 +430,64 @@ class TestTrialBalance:
         assert template.department == "Accounting"
         assert template.estimated_hours == pytest.approx(0.25)
         assert template.default_account_numbers == ["1000"]
+
+    def test_create_account_task_from_existing_template(
+        self,
+        client: TestClient,
+        db_session: Session,
+        sample_period: PeriodModel,
+        sample_user: UserModel,
+    ):
+        trial_balance = TrialBalanceModel(
+            period_id=sample_period.id,
+            name="January TB",
+            source_filename="tb.csv",
+            stored_filename="tb.csv",
+            file_path="/tmp/tb.csv",
+            uploaded_by_id=sample_user.id,
+        )
+        db_session.add(trial_balance)
+        db_session.flush()
+
+        account = TrialBalanceAccountModel(
+            trial_balance_id=trial_balance.id,
+            account_number="1000",
+            account_name="Cash",
+            ending_balance=Decimal("1250.00"),
+        )
+        db_session.add(account)
+
+        template = TaskTemplateModel(
+            name="Cash Reconciliation Template",
+            description="Use the cash workbook template for support",
+            close_type=sample_period.close_type,
+            department="Accounting",
+            default_owner_id=sample_user.id,
+            days_offset=-2,
+            estimated_hours=1.5,
+            default_account_numbers=["1000"],
+        )
+        db_session.add(template)
+        db_session.commit()
+
+        payload = {
+            "name": "Cash Reconciliation",
+            "owner_id": sample_user.id,
+            "status": TaskStatus.NOT_STARTED.value,
+            "template_id": template.id,
+        }
+
+        response = client.post(
+            f"/api/trial-balance/accounts/{account.id}/tasks",
+            json=payload,
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["description"] == template.description
+        assert data["template_id"] == template.id
+        assert data["department"] == template.department
+
+        due_date = datetime.fromisoformat(data["due_date"].replace("Z", "+00:00")) if data["due_date"] else None
+        assert due_date is not None
+        assert due_date == datetime(2024, 2, 3, tzinfo=timezone.utc)

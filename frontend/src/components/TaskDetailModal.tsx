@@ -143,6 +143,7 @@ function buildFileUrl(taskId: number, fileName: string, fileId?: number) {
 export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDetailModalProps) {
   const queryClient = useQueryClient()
   const [uploading, setUploading] = useState(false)
+  const [isDragOver, setIsDragOver] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [supportFileDate, setSupportFileDate] = useState('')
   const [supportDescription, setSupportDescription] = useState('')
@@ -326,6 +327,41 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
       window.removeEventListener('paste', handleClipboardPaste)
     }
   }, [handleClipboardPaste])
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(true)
+  }
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    // Only set to false if we're leaving the drop zone entirely
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const x = e.clientX
+    const y = e.clientY
+    if (x <= rect.left || x >= rect.right || y <= rect.top || y >= rect.bottom) {
+      setIsDragOver(false)
+    }
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+
+    const files = Array.from(e.dataTransfer.files)
+    if (files.length > 0) {
+      handleFileUpload(files[0])
+    }
+  }
 
   const addCommentMutation = useMutation({
     mutationFn: async () => {
@@ -662,7 +698,7 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
                     onChange={(event) => setSupportFileDate(event.target.value)}
                   />
                   <p className="text-xs text-gray-500">
-                    Tip: paste a screenshot with <span className="font-medium">Ctrl/⌘ + V</span> to upload instantly.
+                    Tip: <span className="font-medium">drag & drop</span> files or paste screenshots with <span className="font-medium">Ctrl/⌘ + V</span>
                   </p>
                   {uploadError && <p className="text-xs text-red-600">{uploadError}</p>}
                   {uploading && (
@@ -671,8 +707,23 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
                     </p>
                   )}
                 </div>
-                <div className="space-y-2 max-h-48 overflow-y-auto border border-dashed border-gray-200 rounded-lg p-3">
-                  {files && files.length > 0 ? (
+                <div
+                  className={`space-y-2 max-h-48 overflow-y-auto border-2 border-dashed rounded-lg p-3 transition-colors ${
+                    isDragOver
+                      ? 'border-primary-500 bg-primary-50'
+                      : 'border-gray-200 bg-white'
+                  }`}
+                  onDragOver={handleDragOver}
+                  onDragEnter={handleDragEnter}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                >
+                  {isDragOver && (
+                    <div className="flex items-center justify-center py-8">
+                      <p className="text-sm font-medium text-primary-600">Drop file to upload</p>
+                    </div>
+                  )}
+                  {!isDragOver && files && files.length > 0 ? (
                     files.map((file) => (
                       <div key={file.id} className="text-sm text-gray-700 flex items-center justify-between gap-3">
                         <div>
@@ -704,9 +755,12 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
                         </div>
                       </div>
                     ))
-                  ) : (
-                    <p className="text-xs text-gray-500">No files uploaded yet.</p>
-                  )}
+                  ) : !isDragOver ? (
+                    <div className="text-center py-8">
+                      <Paperclip className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                      <p className="text-xs text-gray-500">No files yet. Drag & drop or use the button above.</p>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </section>

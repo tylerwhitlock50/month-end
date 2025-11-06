@@ -363,6 +363,8 @@ class MissingTaskSuggestion(BaseModel):
     template_id: int
     template_name: str
     accounts: List[MissingTaskSuggestionAccount]
+    description: Optional[str] = None
+    days_offset: Optional[int] = None
     department: Optional[str] = None
     estimated_hours: Optional[float] = None
     default_owner_id: Optional[int] = None

@@ -585,6 +585,37 @@ async def create_task(
             dep_task = db.query(TaskModel).filter(TaskModel.id == dep_id).first()
             if dep_task:
                 db_task.dependencies.append(dep_task)
+    elif db_task.template_id:
+        # If no manual dependencies provided, copy from template
+        template = db.query(TaskTemplateModel).options(
+            selectinload(TaskTemplateModel.dependencies)
+        ).filter(TaskTemplateModel.id == db_task.template_id).first()
+        
+        if template and template.dependencies:
+            for dep_template in template.dependencies:
+                dep_task = db.query(TaskModel).filter(
+                    TaskModel.period_id == task_data.period_id,
+                    TaskModel.template_id == dep_template.id
+                ).first()
+                
+                if dep_task and dep_task not in db_task.dependencies:
+                    db_task.dependencies.append(dep_task)
+        
+        # Also check if any existing tasks should depend on this new task
+        dependent_templates = db.query(TaskTemplateModel).options(
+            selectinload(TaskTemplateModel.dependencies)
+        ).filter(
+            TaskTemplateModel.dependencies.any(id=db_task.template_id)
+        ).all()
+        
+        for dependent_template in dependent_templates:
+            dependent_task = db.query(TaskModel).filter(
+                TaskModel.period_id == task_data.period_id,
+                TaskModel.template_id == dependent_template.id
+            ).first()
+            
+            if dependent_task and db_task not in dependent_task.dependencies:
+                dependent_task.dependencies.append(db_task)
 
     auto_link_tasks_to_trial_balance_accounts(
         db,

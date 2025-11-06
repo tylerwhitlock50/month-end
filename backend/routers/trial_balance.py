@@ -866,7 +866,13 @@ async def create_account_task(
         if not assignee:
             raise HTTPException(status_code=404, detail="Assignee not found")
 
-    base_department = payload.department or payload.template_department
+    template = None
+    if payload.template_id:
+        template = db.query(TaskTemplateModel).filter(TaskTemplateModel.id == payload.template_id).first()
+        if not template:
+            raise HTTPException(status_code=404, detail="Task template not found")
+
+    base_department = payload.department or payload.template_department or (template.department if template and template.department else None)
     if base_department:
         normalized_department = base_department.strip() or "Accounting"
     elif payload.save_as_template:
@@ -875,19 +881,25 @@ async def create_account_task(
         normalized_department = (account.account_type or "Accounting").strip() or "Accounting"
 
     template_estimated_hours = payload.template_estimated_hours
+    if template_estimated_hours is None and template and template.estimated_hours is not None:
+        template_estimated_hours = template.estimated_hours
     if template_estimated_hours is None and payload.save_as_template:
         template_estimated_hours = 0.25
 
     estimated_hours = template_estimated_hours
 
+    task_description = payload.description if payload.description is not None else (template.description if template else None)
+
+    effective_days_offset = payload.days_offset if payload.days_offset is not None else (template.days_offset if template else None)
+
     due_date_value = payload.due_date
-    if due_date_value is None and payload.days_offset is not None:
-        due_date_value = _calculate_due_date_from_offset(period, payload.days_offset)
+    if due_date_value is None and effective_days_offset is not None:
+        due_date_value = _calculate_due_date_from_offset(period, effective_days_offset)
 
     new_task = TaskModel(
         period_id=period.id,
         name=payload.name,
-        description=payload.description,
+        description=task_description,
         owner_id=payload.owner_id,
         assignee_id=payload.assignee_id,
         status=payload.status,
@@ -901,6 +913,9 @@ async def create_account_task(
     db.add(new_task)
     account.tasks.append(new_task)
     db.flush()
+
+    if template and not payload.save_as_template:
+        new_task.template_id = template.id
 
     if payload.save_as_template:
         default_account_numbers = [
@@ -926,6 +941,50 @@ async def create_account_task(
         db.add(template)
         db.flush()
         new_task.template_id = template.id
+
+    # Auto-link the task to all matching trial balance accounts based on template
+    if payload.template_id or (payload.save_as_template and new_task.template_id):
+        auto_link_tasks_to_trial_balance_accounts(
+            db,
+            period_id=period.id,
+            trial_balance_id=trial_balance.id,
+            task_ids=[new_task.id]
+        )
+
+    # Copy template dependencies to the new task
+    if new_task.template_id:
+        template = db.query(TaskTemplateModel).options(
+            selectinload(TaskTemplateModel.dependencies)
+        ).filter(TaskTemplateModel.id == new_task.template_id).first()
+        
+        if template and template.dependencies:
+            # Find existing tasks in this period that match the dependency templates
+            for dep_template in template.dependencies:
+                dep_task = db.query(TaskModel).filter(
+                    TaskModel.period_id == period.id,
+                    TaskModel.template_id == dep_template.id
+                ).first()
+                
+                if dep_task and dep_task not in new_task.dependencies:
+                    new_task.dependencies.append(dep_task)
+        
+        # Also check if any existing tasks should depend on this new task
+        # Find templates that depend on this task's template
+        dependent_templates = db.query(TaskTemplateModel).options(
+            selectinload(TaskTemplateModel.dependencies)
+        ).filter(
+            TaskTemplateModel.dependencies.any(id=new_task.template_id)
+        ).all()
+        
+        for dependent_template in dependent_templates:
+            # Find the task in this period that uses this dependent template
+            dependent_task = db.query(TaskModel).filter(
+                TaskModel.period_id == period.id,
+                TaskModel.template_id == dependent_template.id
+            ).first()
+            
+            if dependent_task and new_task not in dependent_task.dependencies:
+                dependent_task.dependencies.append(new_task)
 
     db.commit()
     db.refresh(new_task)
@@ -1329,7 +1388,7 @@ async def get_missing_task_suggestions(
     for template in templates:
         if not template.default_account_numbers:
             continue
-        
+
         # Check if a task already exists for this template in this period
         existing_task = db.query(TaskModel).filter(
             TaskModel.period_id == period_id,
@@ -1359,10 +1418,12 @@ async def get_missing_task_suggestions(
             suggestions.append(MissingTaskSuggestion(
                 template_id=template.id,
                 template_name=template.name,
+                description=template.description,
+                days_offset=template.days_offset,
                 accounts=matching_accounts,
                 department=template.department,
                 estimated_hours=template.estimated_hours,
-                default_owner_id=template.default_owner_id
+                default_owner_id=template.default_owner_id,
             ))
-    
+
     return suggestions

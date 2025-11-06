@@ -13,6 +13,8 @@ interface MissingTaskSuggestion {
   template_id: number
   template_name: string
   accounts: MissingTaskSuggestionAccount[]
+  description?: string
+  days_offset?: number
   department?: string
   estimated_hours?: number
   default_owner_id?: number
@@ -89,7 +91,7 @@ export default function GenerateMissingTasksModal({
     setIsGenerating(true)
     setProgress({ current: 0, total: selectedTemplateIds.size })
 
-    const suggestionsToProcess = suggestions.filter(s =>
+    const suggestionsToProcess = suggestions.filter((s) =>
       selectedTemplateIds.has(s.template_id)
     )
 
@@ -98,33 +100,23 @@ export default function GenerateMissingTasksModal({
     for (let i = 0; i < suggestionsToProcess.length; i++) {
       const suggestion = suggestionsToProcess[i]
       try {
-        // Create task using the first account's endpoint which links automatically
         const firstAccount = suggestion.accounts[0]
-        const response = await api.post(`/api/trial-balance/accounts/${firstAccount.account_id}/tasks`, {
+        if (!firstAccount) {
+          throw new Error('No accounts linked to this template')
+        }
+        if (!suggestion.default_owner_id) {
+          throw new Error('Template is missing a default owner')
+        }
+
+        await api.post(`/api/trial-balance/accounts/${firstAccount.account_id}/tasks`, {
           name: suggestion.template_name,
           owner_id: suggestion.default_owner_id,
           status: 'not_started',
           department: suggestion.department,
           template_id: suggestion.template_id,
+          description: suggestion.description,
+          days_offset: suggestion.days_offset,
         })
-
-        // Link the task to all other accounts in the suggestion
-        const taskId = response.data.id
-        for (let j = 1; j < suggestion.accounts.length; j++) {
-          const account = suggestion.accounts[j]
-          try {
-            // Get current task list for this account
-            const accountResponse = await api.get(`/api/trial-balance/accounts/${account.account_id}`)
-            const currentTaskIds = accountResponse.data.tasks.map((t: any) => t.id)
-            
-            // Add the new task to this account's task list
-            await api.put(`/api/trial-balance/accounts/${account.account_id}/tasks`, {
-              task_ids: [...currentTaskIds, taskId]
-            })
-          } catch (linkErr) {
-            console.error(`Failed to link task to account ${account.account_number}:`, linkErr)
-          }
-        }
 
         successCount++
       } catch (err) {
@@ -276,6 +268,20 @@ export default function GenerateMissingTasksModal({
                         </div>
                       </div>
                     </button>
+
+                    {(suggestion.description || typeof suggestion.days_offset === 'number') && (
+                      <div className="px-4 py-3 text-xs text-gray-600 bg-white border-t border-gray-100">
+                        {suggestion.description && (
+                          <p className="mb-1 text-gray-700">{suggestion.description}</p>
+                        )}
+                        {typeof suggestion.days_offset === 'number' && (
+                          <p className="text-gray-500">
+                            Offset from close: {suggestion.days_offset >= 0 ? `+${suggestion.days_offset}` : suggestion.days_offset} day
+                            {Math.abs(suggestion.days_offset) === 1 ? '' : 's'}
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                     <div className="divide-y divide-gray-100 bg-white">
                       {suggestion.accounts.map((account) => (
