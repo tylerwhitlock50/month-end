@@ -13,6 +13,7 @@ import {
   Loader,
 } from 'lucide-react'
 import api from '../lib/api'
+import { formatDate, getDateFromDaysOffset, type PeriodDateContext } from '../lib/utils'
 
 interface TaskOption {
   id: number
@@ -49,6 +50,11 @@ interface Validation {
   evidence_uploaded_at?: string
   evidence_url?: string
   task?: AccountSummaryTask
+}
+
+interface PeriodSummary extends PeriodDateContext {
+  id: number
+  name: string
 }
 
 interface TrialBalanceAccountModalProps {
@@ -125,7 +131,7 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
   const [newTaskOwnerId, setNewTaskOwnerId] = useState<number | ''>('')
   const [newTaskAssigneeId, setNewTaskAssigneeId] = useState<number | ''>('')
   const [newTaskStatus, setNewTaskStatus] = useState<TaskStatusValue>('not_started')
-  const [newTaskDueDate, setNewTaskDueDate] = useState('')
+  const [newTaskOffset, setNewTaskOffset] = useState('0')
   const [newTaskPriority, setNewTaskPriority] = useState<number>(5)
   const [saveAsTemplate, setSaveAsTemplate] = useState(false)
   const [templateName, setTemplateName] = useState(`${account.account_name} Task Template`)
@@ -152,7 +158,7 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
     setNewTaskOwnerId('')
     setNewTaskAssigneeId('')
     setNewTaskStatus('not_started')
-    setNewTaskDueDate('')
+    setNewTaskOffset('0')
     setNewTaskPriority(5)
     setSaveAsTemplate(false)
     setTemplateName(`${account.account_name} Task Template`)
@@ -199,6 +205,21 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
       return response.data as Array<{ id: number; name: string }>
     },
   })
+
+  const periodQuery = useQuery<PeriodSummary>({
+    queryKey: ['period', periodId],
+    queryFn: async () => {
+      const response = await api.get(`/api/periods/${periodId}`)
+      return response.data as PeriodSummary
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const dueDatePreview = useMemo(() => {
+    const offsetValue = Number(newTaskOffset)
+    if (Number.isNaN(offsetValue)) return null
+    return getDateFromDaysOffset(periodQuery.data, offsetValue)
+  }, [newTaskOffset, periodQuery.data])
 
   const updateAccountMutation = useMutation({
     mutationFn: async (payload: { notes?: string; is_verified?: boolean }) => {
@@ -279,7 +300,7 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
       owner_id: number
       assignee_id?: number
       status: TaskStatusValue
-      due_date?: string
+      days_offset?: number
       priority?: number
       department?: string
       save_as_template?: boolean
@@ -299,7 +320,7 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
       setNewTaskOwnerId('')
       setNewTaskAssigneeId('')
       setNewTaskStatus('not_started')
-      setNewTaskDueDate('')
+      setNewTaskOffset('0')
       setNewTaskPriority(5)
       setSaveAsTemplate(false)
       setTemplateName(`${account.account_name} Task Template`)
@@ -460,7 +481,7 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
       owner_id: number
       assignee_id?: number
       status: TaskStatusValue
-      due_date?: string
+      days_offset?: number
       priority?: number
       department?: string
       save_as_template?: boolean
@@ -481,12 +502,12 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
     if (newTaskAssigneeId !== '') {
       payload.assignee_id = Number(newTaskAssigneeId)
     }
-    if (newTaskDueDate) {
-      const dateValue = new Date(newTaskDueDate)
-      if (!Number.isNaN(dateValue.getTime())) {
-        payload.due_date = dateValue.toISOString()
-      }
+    const offsetValue = newTaskOffset.trim() === '' ? 0 : Number(newTaskOffset)
+    if (Number.isNaN(offsetValue)) {
+      setCreateTaskError('Enter a valid days offset (use negatives for before close)')
+      return
     }
+    payload.days_offset = offsetValue
     if (newTaskPriority) {
       payload.priority = newTaskPriority
     }
@@ -648,13 +669,19 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
                 </select>
               </div>
               <div className="space-y-2">
-                <label className="label">Due date</label>
+                <label className="label">Days offset from close</label>
                 <input
-                  type="datetime-local"
+                  type="number"
                   className="input"
-                  value={newTaskDueDate}
-                  onChange={(event) => setNewTaskDueDate(event.target.value)}
+                  value={newTaskOffset}
+                  onChange={(event) => setNewTaskOffset(event.target.value)}
+                  placeholder="0"
                 />
+                <p className="text-xs text-gray-500">
+                  {dueDatePreview
+                    ? `Targets ${formatDate(dueDatePreview)} using the period close date.`
+                    : 'Offsets anchor to the period close date or month end.'}
+                </p>
               </div>
               <div className="space-y-2">
                 <label className="label">Priority</label>

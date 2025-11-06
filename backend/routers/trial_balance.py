@@ -3,7 +3,7 @@ import io
 import os
 import uuid
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from pathlib import Path
 from typing import List, Optional
 import calendar
@@ -263,6 +263,19 @@ def _calculate_template_offset(period: PeriodModel, due_date: Optional[datetime]
         due = due_date.date()
 
     return (due - anchor).days
+
+
+def _calculate_due_date_from_offset(period: PeriodModel, offset_days: int) -> datetime:
+    """Return an aware datetime by applying offset days to the close anchor."""
+
+    if period.target_close_date:
+        anchor = period.target_close_date
+    else:
+        last_day = calendar.monthrange(period.year, period.month)[1]
+        anchor = date(period.year, period.month, last_day)
+
+    anchor_dt = datetime.combine(anchor, datetime.min.time()).replace(tzinfo=timezone.utc)
+    return anchor_dt + timedelta(days=offset_days)
 
 
 def _format_notes_from_metadata(metadata: dict, warnings: list[str]) -> Optional[str]:
@@ -867,6 +880,10 @@ async def create_account_task(
 
     estimated_hours = template_estimated_hours
 
+    due_date_value = payload.due_date
+    if due_date_value is None and payload.days_offset is not None:
+        due_date_value = _calculate_due_date_from_offset(period, payload.days_offset)
+
     new_task = TaskModel(
         period_id=period.id,
         name=payload.name,
@@ -874,10 +891,11 @@ async def create_account_task(
         owner_id=payload.owner_id,
         assignee_id=payload.assignee_id,
         status=payload.status,
-        due_date=payload.due_date,
+        due_date=due_date_value,
         priority=payload.priority if payload.priority is not None else 5,
         department=normalized_department,
         estimated_hours=estimated_hours,
+        template_id=payload.template_id,
     )
 
     db.add(new_task)
@@ -901,7 +919,7 @@ async def create_account_task(
             close_type=period.close_type,
             default_owner_id=payload.owner_id,
             department=payload.template_department or normalized_department,
-            days_offset=_calculate_template_offset(period, payload.due_date),
+            days_offset=_calculate_template_offset(period, due_date_value),
             estimated_hours=template_estimated_hours if template_estimated_hours is not None else 0.25,
             default_account_numbers=default_account_numbers,
         )
@@ -1312,37 +1330,39 @@ async def get_missing_task_suggestions(
         if not template.default_account_numbers:
             continue
         
-        # For each account number in template's default list
+        # Check if a task already exists for this template in this period
+        existing_task = db.query(TaskModel).filter(
+            TaskModel.period_id == period_id,
+            TaskModel.template_id == template.id
+        ).first()
+        
+        if existing_task:
+            # Task already exists for this template
+            continue
+        
+        # Find all accounts from this template that exist in the trial balance
+        matching_accounts = []
         for account_number in template.default_account_numbers:
             account_number_clean = str(account_number).strip()
             
             # Check if this account exists in trial balance
-            if account_number_clean not in account_map:
-                continue
-            
-            account = account_map[account_number_clean]
-            
-            # Check if a task already exists for this template + account in this period
-            existing_task = db.query(TaskModel).join(
-                trial_balance_account_tasks,
-                TaskModel.id == trial_balance_account_tasks.c.task_id
-            ).filter(
-                TaskModel.period_id == period_id,
-                TaskModel.template_id == template.id,
-                trial_balance_account_tasks.c.account_id == account.id
-            ).first()
-            
-            if not existing_task:
-                # This is a missing task - template exists, account exists, but no task
-                suggestions.append(MissingTaskSuggestion(
-                    template_id=template.id,
-                    template_name=template.name,
-                    account_id=account.id,
-                    account_number=account.account_number,
-                    account_name=account.account_name,
-                    department=template.department,
-                    estimated_hours=template.estimated_hours,
-                    default_owner_id=template.default_owner_id
-                ))
+            if account_number_clean in account_map:
+                account = account_map[account_number_clean]
+                matching_accounts.append({
+                    "account_id": account.id,
+                    "account_number": account.account_number,
+                    "account_name": account.account_name,
+                })
+        
+        # Only suggest if at least one account exists
+        if matching_accounts:
+            suggestions.append(MissingTaskSuggestion(
+                template_id=template.id,
+                template_name=template.name,
+                accounts=matching_accounts,
+                department=template.department,
+                estimated_hours=template.estimated_hours,
+                default_owner_id=template.default_owner_id
+            ))
     
     return suggestions

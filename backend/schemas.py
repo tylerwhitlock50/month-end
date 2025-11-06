@@ -351,13 +351,18 @@ class TaskBulkDeleteResult(BaseModel):
     deleted: int
 
 
-class MissingTaskSuggestion(BaseModel):
-    """Suggestion for a missing task based on template and account."""
-    template_id: int
-    template_name: str
+class MissingTaskSuggestionAccount(BaseModel):
+    """Account info for a missing task suggestion."""
     account_id: int
     account_number: str
     account_name: str
+
+
+class MissingTaskSuggestion(BaseModel):
+    """Suggestion for a missing task based on template and account(s)."""
+    template_id: int
+    template_name: str
+    accounts: List[MissingTaskSuggestionAccount]
     department: Optional[str] = None
     estimated_hours: Optional[float] = None
     default_owner_id: Optional[int] = None
@@ -656,8 +661,10 @@ class TrialBalanceAccountTaskCreate(BaseModel):
     assignee_id: Optional[int] = None
     status: TaskStatus = TaskStatus.NOT_STARTED
     due_date: Optional[datetime] = None
+    days_offset: Optional[int] = None
     priority: Optional[int] = Field(None, ge=1, le=10)
     department: Optional[str] = None
+    template_id: Optional[int] = None
     save_as_template: bool = False
     template_name: Optional[str] = None
     template_department: Optional[str] = None

@@ -12,6 +12,7 @@ This file tests the remaining routers:
 
 import pytest
 from decimal import Decimal
+from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -26,6 +27,7 @@ from backend.models import (
     TrialBalance as TrialBalanceModel,
     TrialBalanceAccount as TrialBalanceAccountModel,
     TaskStatus,
+    ApprovalStatus,
     CloseType
 )
 
@@ -77,12 +79,43 @@ class TestApprovals:
             "status": "approved",
             "notes": "Looks good"
         }
-        
+
         response = client.put(f"/api/approvals/{approval.id}", json=update_data)
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "approved"
+
+    def test_task_moves_to_complete_when_final_approval_passes(
+        self,
+        client: TestClient,
+        db_session: Session,
+        sample_task: TaskModel,
+        sample_user: UserModel,
+    ):
+        """Approving the last pending review should complete the task."""
+        sample_task.status = TaskStatus.REVIEW
+        db_session.commit()
+        db_session.refresh(sample_task)
+
+        approval = ApprovalModel(
+            task_id=sample_task.id,
+            reviewer_id=sample_user.id,
+            status=ApprovalStatus.PENDING,
+        )
+        db_session.add(approval)
+        db_session.commit()
+        db_session.refresh(approval)
+
+        response = client.put(
+            f"/api/approvals/{approval.id}",
+            json={"status": ApprovalStatus.APPROVED.value},
+        )
+
+        assert response.status_code == 200
+        db_session.refresh(sample_task)
+        assert sample_task.status == TaskStatus.COMPLETE
+        assert sample_task.completed_at is not None
 
 
 # ============================================================================
@@ -367,6 +400,7 @@ class TestTrialBalance:
             "owner_id": sample_user.id,
             "status": TaskStatus.IN_PROGRESS.value,
             "priority": 6,
+            "days_offset": -2,
             "save_as_template": True,
             "template_name": "Cash Reconciliation"
         }
@@ -387,6 +421,7 @@ class TestTrialBalance:
         assert account.tasks[0].template_id is not None
         assert account.tasks[0].department == "Accounting"
         assert account.tasks[0].estimated_hours == pytest.approx(0.25)
+        assert account.tasks[0].due_date == datetime(2024, 2, 3, tzinfo=timezone.utc)
 
         template = db_session.query(TaskTemplateModel).filter(
             TaskTemplateModel.id == account.tasks[0].template_id

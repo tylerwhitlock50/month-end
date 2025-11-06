@@ -10,7 +10,8 @@ from backend.models import (
     Task as TaskModel,
     User as UserModel,
     AuditLog as AuditLogModel,
-    ApprovalStatus
+    ApprovalStatus,
+    TaskStatus,
 )
 from backend.schemas import Approval, ApprovalCreate, ApprovalUpdate, ApprovalWithReviewer
 
@@ -114,7 +115,7 @@ async def update_approval(
     approval = db.query(ApprovalModel).filter(ApprovalModel.id == approval_id).first()
     if not approval:
         raise HTTPException(status_code=404, detail="Approval not found")
-    
+
     # Only the assigned reviewer can update the approval
     if approval.reviewer_id != current_user.id:
         raise HTTPException(
@@ -124,15 +125,44 @@ async def update_approval(
     
     old_status = approval.status
     
+    task = db.query(TaskModel).filter(TaskModel.id == approval.task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found for approval")
+
     # Update approval
     approval.status = approval_update.status
     if approval_update.notes:
         approval.notes = approval_update.notes
     approval.reviewed_at = datetime.utcnow()
-    
-    db.commit()
-    db.refresh(approval)
-    
+
+    task_status_log = None
+    if approval_update.status == ApprovalStatus.APPROVED:
+        remaining_reviews = (
+            db.query(ApprovalModel)
+            .filter(
+                ApprovalModel.task_id == approval.task_id,
+                ApprovalModel.id != approval.id,
+                ApprovalModel.status != ApprovalStatus.APPROVED,
+            )
+            .count()
+        )
+
+        if remaining_reviews == 0 and task.status != TaskStatus.COMPLETE:
+            old_task_status = task.status
+            task.status = TaskStatus.COMPLETE
+            task.completed_at = datetime.utcnow()
+
+            task_status_log = AuditLogModel(
+                task_id=task.id,
+                user_id=current_user.id,
+                action="task_status_updated",
+                entity_type="task",
+                entity_id=task.id,
+                old_value=old_task_status.value if old_task_status else None,
+                new_value=TaskStatus.COMPLETE.value,
+                details=f"Task auto-completed after approval #{approval.id}",
+            )
+
     # Log approval update
     audit_log = AuditLogModel(
         task_id=approval.task_id,
@@ -145,8 +175,12 @@ async def update_approval(
         details=approval_update.notes
     )
     db.add(audit_log)
+    if task_status_log:
+        db.add(task_status_log)
+
     db.commit()
-    
+    db.refresh(approval)
+
     return approval
 
 

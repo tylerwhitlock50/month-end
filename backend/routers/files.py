@@ -1,6 +1,6 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File as FastAPIFile
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File as FastAPIFile, Response
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 import os
 import uuid
@@ -562,12 +562,11 @@ async def download_period_zip(
     
     # Create filename
     zip_filename = f"{period.name.replace(' ', '_')}_files.zip"
-    
-    # Return streaming response
-    return StreamingResponse(
-        zip_buffer,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": f"attachment; filename={zip_filename}"
-        }
-    )
+
+    # Convert buffer to bytes so CORSMiddleware can attach headers before the body streams
+    zip_bytes = zip_buffer.getvalue()
+
+    response = Response(content=zip_bytes, media_type="application/zip")
+    response.headers["Content-Disposition"] = f"attachment; filename={zip_filename}"
+    response.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
+    return response

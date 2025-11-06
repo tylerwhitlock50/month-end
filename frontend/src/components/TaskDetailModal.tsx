@@ -18,7 +18,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import api, { API_URL } from '../lib/api'
-import { formatDate, formatDateTime, getStatusLabel, getStatusColor } from '../lib/utils'
+import { formatDate, formatDateTime, getStatusLabel, getStatusColor, getNextStatusInFlow, getAdvanceStatusLabel } from '../lib/utils'
 import FilePreviewModal from './FilePreviewModal'
 import TaskTimeline from './TaskTimeline'
 
@@ -405,14 +405,10 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
   const statusWatch = watch('status')
   const currentStatus = (statusWatch as string | undefined) ?? taskData?.status ?? 'not_started'
 
-  const nextStatusForButton = useMemo(() => {
-    if (currentStatus === 'complete') return 'complete'
-    if (currentStatus === 'review') return 'complete'
-    return 'review'
-  }, [currentStatus])
+  const nextStatusForButton = useMemo(() => getNextStatusInFlow(currentStatus), [currentStatus])
 
   const markComplete = () => {
-    if (currentStatus === 'complete') {
+    if (currentStatus === 'complete' || nextStatusForButton === currentStatus) {
       return
     }
 
@@ -424,14 +420,10 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
     )()
   }
 
-  const markButtonLabel = useMemo(() => {
-    if (currentStatus === 'complete') return 'Task Completed'
-    if (currentStatus === 'review') return 'Mark Complete'
-    return 'Send to Review'
-  }, [currentStatus])
+  const markButtonLabel = useMemo(() => getAdvanceStatusLabel(currentStatus), [currentStatus])
 
-  const markButtonDisabled = currentStatus === 'complete' || updateMutation.isPending
-  const markButtonClass = currentStatus === 'review' ? 'btn-success' : 'btn-secondary'
+  const markButtonDisabled = currentStatus === 'complete' || nextStatusForButton === currentStatus || updateMutation.isPending
+  const markButtonClass = nextStatusForButton === 'complete' ? 'btn-success' : 'btn-secondary'
 
   const dependencyDetails = (taskData?.dependency_details ?? []) as DependencySummary[]
   const dependentDetails = (taskData?.dependent_details ?? []) as DependencySummary[]

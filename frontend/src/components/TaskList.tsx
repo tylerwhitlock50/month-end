@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import clsx from 'clsx'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Calendar, User, Paperclip, CheckCircle2, AlertTriangle, GitBranch, GitMerge, Trash2 } from 'lucide-react'
-import { formatDate, getStatusColor, getStatusLabel } from '../lib/utils'
+import { formatDate, getStatusColor, getStatusLabel, getNextStatusInFlow, getAdvanceStatusLabel } from '../lib/utils'
 import api from '../lib/api'
 
 interface TaskListProps {
@@ -393,6 +393,19 @@ export default function TaskList({ tasks, onSelectTask, selectedTaskIds, onSelec
               }>
               const incompleteDependencies = dependencyDetails.filter((dep) => dep.status !== 'complete')
               const isBlocked = incompleteDependencies.length > 0
+              const nextStatus = getNextStatusInFlow(task.status)
+              const advanceLabel = getAdvanceStatusLabel(task.status)
+              const isAdvanceSaving = updateTaskMutation.isPending && updatingTaskId === task.id
+              const isAdvanceDisabled = task.status === 'complete' || isAdvanceSaving || nextStatus === task.status
+              const advanceButtonClasses = clsx(
+                'inline-flex items-center gap-1 rounded-md font-medium transition-colors border',
+                compact ? 'px-2 py-1 text-[10px]' : 'px-3 py-1.5 text-xs',
+                task.status === 'complete'
+                  ? 'bg-green-100 text-green-700 border-green-200'
+                  : nextStatus === 'complete'
+                    ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
+                    : 'bg-primary-600 text-white border-primary-600 hover:bg-primary-700'
+              )
 
               return (
               <tr
@@ -586,30 +599,16 @@ export default function TaskList({ tasks, onSelectTask, selectedTaskIds, onSelec
                         )}
                         <button
                           type="button"
-                          className={clsx(
-                            'inline-flex items-center gap-1 rounded-md font-medium transition-colors',
-                            compact ? 'px-2 py-1 text-[10px]' : 'px-3 py-1.5 text-xs',
-                            task.status === 'complete'
-                              ? 'bg-green-100 text-green-700 border border-green-200'
-                              : 'bg-primary-600 text-white border border-primary-600 hover:bg-primary-700'
-                          )}
-                          disabled={
-                            task.status === 'complete' ||
-                            (updateTaskMutation.isPending && updatingTaskId === task.id)
-                          }
-                          onClick={() => handleStatusChange(task.id, 'complete')}
+                          className={advanceButtonClasses}
+                          disabled={isAdvanceDisabled}
+                          onClick={() => handleStatusChange(task.id, nextStatus)}
                         >
-                          {updateTaskMutation.isPending && updatingTaskId === task.id ? (
+                          {isAdvanceSaving ? (
                             'Saving...'
-                          ) : task.status === 'complete' ? (
-                            <>
-                              <CheckCircle2 className={compact ? 'w-3 h-3' : 'w-4 h-4'} />
-                              {!compact && 'Completed'}
-                            </>
                           ) : (
                             <>
                               <CheckCircle2 className={compact ? 'w-3 h-3' : 'w-4 h-4'} />
-                              {!compact && 'Mark Complete'}
+                              {!compact && advanceLabel}
                             </>
                           )}
                         </button>
@@ -626,4 +625,3 @@ export default function TaskList({ tasks, onSelectTask, selectedTaskIds, onSelec
     </div>
   )
 }
-

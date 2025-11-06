@@ -1,14 +1,18 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { X, Loader2, Sparkles, CheckSquare, Square, AlertCircle } from 'lucide-react'
 import api from '../lib/api'
 
-interface MissingTaskSuggestion {
-  template_id: number
-  template_name: string
+interface MissingTaskSuggestionAccount {
   account_id: number
   account_number: string
   account_name: string
+}
+
+interface MissingTaskSuggestion {
+  template_id: number
+  template_name: string
+  accounts: MissingTaskSuggestionAccount[]
   department?: string
   estimated_hours?: number
   default_owner_id?: number
@@ -28,7 +32,7 @@ export default function GenerateMissingTasksModal({
   trialBalanceId,
 }: GenerateMissingTasksModalProps) {
   const queryClient = useQueryClient()
-  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set())
+  const [selectedTemplateIds, setSelectedTemplateIds] = useState<Set<number>>(new Set())
   const [error, setError] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState({ current: 0, total: 0 })
@@ -42,56 +46,22 @@ export default function GenerateMissingTasksModal({
     },
   })
 
-  // Group suggestions by template
-  const suggestionsByTemplate = useMemo(() => {
-    if (!suggestions) return {}
-    
-    const grouped: Record<string, MissingTaskSuggestion[]> = {}
-    suggestions.forEach((suggestion) => {
-      const key = `${suggestion.template_id}`
-      if (!grouped[key]) {
-        grouped[key] = []
-      }
-      grouped[key].push(suggestion)
-    })
-    return grouped
-  }, [suggestions])
-
   // Initialize all suggestions as selected
   useEffect(() => {
-    if (suggestions && selectedSuggestions.size === 0) {
-      const allKeys = suggestions.map(s => `${s.template_id}-${s.account_id}`)
-      setSelectedSuggestions(new Set(allKeys))
+    if (suggestions && selectedTemplateIds.size === 0) {
+      const allTemplateIds = suggestions.map(s => s.template_id)
+      setSelectedTemplateIds(new Set(allTemplateIds))
     }
-  }, [suggestions, selectedSuggestions.size])
-
-  const handleToggleSuggestion = (templateId: number, accountId: number) => {
-    const key = `${templateId}-${accountId}`
-    setSelectedSuggestions((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) {
-        next.delete(key)
-      } else {
-        next.add(key)
-      }
-      return next
-    })
-  }
+  }, [suggestions, selectedTemplateIds.size])
 
   const handleToggleTemplate = (templateId: number) => {
-    const templateSuggestions = suggestionsByTemplate[templateId] || []
-    const templateKeys = templateSuggestions.map(s => `${s.template_id}-${s.account_id}`)
-    const allSelected = templateKeys.every(key => selectedSuggestions.has(key))
-    
-    setSelectedSuggestions((prev) => {
+    setSelectedTemplateIds((prev) => {
       const next = new Set(prev)
-      templateKeys.forEach(key => {
-        if (allSelected) {
-          next.delete(key)
-        } else {
-          next.add(key)
-        }
-      })
+      if (next.has(templateId)) {
+        next.delete(templateId)
+      } else {
+        next.add(templateId)
+      }
       return next
     })
   }
@@ -99,16 +69,16 @@ export default function GenerateMissingTasksModal({
   const handleSelectAll = () => {
     if (!suggestions) return
     
-    if (selectedSuggestions.size === suggestions.length) {
-      setSelectedSuggestions(new Set())
+    if (selectedTemplateIds.size === suggestions.length) {
+      setSelectedTemplateIds(new Set())
     } else {
-      const allKeys = suggestions.map(s => `${s.template_id}-${s.account_id}`)
-      setSelectedSuggestions(new Set(allKeys))
+      const allTemplateIds = suggestions.map(s => s.template_id)
+      setSelectedTemplateIds(new Set(allTemplateIds))
     }
   }
 
   const handleGenerate = async () => {
-    if (selectedSuggestions.size === 0) {
+    if (selectedTemplateIds.size === 0) {
       setError('Please select at least one task to generate')
       return
     }
@@ -117,10 +87,10 @@ export default function GenerateMissingTasksModal({
 
     setError('')
     setIsGenerating(true)
-    setProgress({ current: 0, total: selectedSuggestions.size })
+    setProgress({ current: 0, total: selectedTemplateIds.size })
 
     const suggestionsToProcess = suggestions.filter(s =>
-      selectedSuggestions.has(`${s.template_id}-${s.account_id}`)
+      selectedTemplateIds.has(s.template_id)
     )
 
     let successCount = 0
@@ -128,17 +98,37 @@ export default function GenerateMissingTasksModal({
     for (let i = 0; i < suggestionsToProcess.length; i++) {
       const suggestion = suggestionsToProcess[i]
       try {
-        // Create task using the trial balance account endpoint which links automatically
-        await api.post(`/api/trial-balance/accounts/${suggestion.account_id}/tasks`, {
+        // Create task using the first account's endpoint which links automatically
+        const firstAccount = suggestion.accounts[0]
+        const response = await api.post(`/api/trial-balance/accounts/${firstAccount.account_id}/tasks`, {
           name: suggestion.template_name,
           owner_id: suggestion.default_owner_id,
           status: 'not_started',
           department: suggestion.department,
+          template_id: suggestion.template_id,
         })
+
+        // Link the task to all other accounts in the suggestion
+        const taskId = response.data.id
+        for (let j = 1; j < suggestion.accounts.length; j++) {
+          const account = suggestion.accounts[j]
+          try {
+            // Get current task list for this account
+            const accountResponse = await api.get(`/api/trial-balance/accounts/${account.account_id}`)
+            const currentTaskIds = accountResponse.data.tasks.map((t: any) => t.id)
+            
+            // Add the new task to this account's task list
+            await api.put(`/api/trial-balance/accounts/${account.account_id}/tasks`, {
+              task_ids: [...currentTaskIds, taskId]
+            })
+          } catch (linkErr) {
+            console.error(`Failed to link task to account ${account.account_number}:`, linkErr)
+          }
+        }
 
         successCount++
       } catch (err) {
-        console.error(`Failed to create task for ${suggestion.account_number}:`, err)
+        console.error(`Failed to create task for ${suggestion.template_name}:`, err)
       }
 
       setProgress({ current: i + 1, total: suggestionsToProcess.length })
@@ -252,84 +242,55 @@ export default function GenerateMissingTasksModal({
                 className="text-xs text-primary-600 hover:text-primary-700 font-medium"
                 disabled={isGenerating}
               >
-                {selectedSuggestions.size === suggestions.length ? 'Deselect All' : 'Select All'}
+                {selectedTemplateIds.size === suggestions.length ? 'Deselect All' : 'Select All'}
               </button>
             </div>
 
             <div className="space-y-3">
-              {Object.entries(suggestionsByTemplate).map(([templateIdStr, templateSuggestions]) => {
-                const templateId = Number(templateIdStr)
-                const templateName = templateSuggestions[0].template_name
-                const department = templateSuggestions[0].department
-                const templateKeys = templateSuggestions.map(s => `${s.template_id}-${s.account_id}`)
-                const allTemplateSelected = templateKeys.every(key => selectedSuggestions.has(key))
-                const someTemplateSelected = templateKeys.some(key => selectedSuggestions.has(key))
+              {suggestions.map((suggestion) => {
+                const isSelected = selectedTemplateIds.has(suggestion.template_id)
 
                 return (
-                  <div key={templateId} className="border border-gray-200 rounded-lg overflow-hidden">
-                    <div className="bg-gray-50 px-4 py-3 flex items-center gap-3 border-b border-gray-200">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleTemplate(templateId)}
-                        className="flex items-center gap-2 hover:text-primary-600 transition-colors"
-                        disabled={isGenerating}
-                      >
-                        {allTemplateSelected ? (
-                          <CheckSquare className="w-5 h-5 text-primary-600" />
-                        ) : someTemplateSelected ? (
-                          <div className="w-5 h-5 border-2 border-primary-600 rounded flex items-center justify-center">
-                            <div className="w-2.5 h-2.5 bg-primary-600 rounded-sm" />
+                  <div key={suggestion.template_id} className="border border-gray-200 rounded-lg overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleTemplate(suggestion.template_id)}
+                      className="w-full bg-gray-50 px-4 py-3 flex items-center gap-3 hover:bg-gray-100 transition-colors"
+                      disabled={isGenerating}
+                    >
+                      {isSelected ? (
+                        <CheckSquare className="w-5 h-5 text-primary-600 flex-shrink-0" />
+                      ) : (
+                        <Square className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                      )}
+                      <div className="text-left flex-1">
+                        <div className="font-semibold text-gray-900 text-sm">
+                          {suggestion.template_name}
+                          {suggestion.department && (
+                            <span className="ml-2 text-xs font-normal text-gray-500">({suggestion.department})</span>
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          {suggestion.accounts.length} account{suggestion.accounts.length !== 1 ? 's' : ''}
+                          {suggestion.estimated_hours && ` · ~${suggestion.estimated_hours}h`}
+                        </div>
+                      </div>
+                    </button>
+
+                    <div className="divide-y divide-gray-100 bg-white">
+                      {suggestion.accounts.map((account) => (
+                        <div
+                          key={account.account_id}
+                          className="px-4 py-2.5 pl-12"
+                        >
+                          <div className="text-sm font-medium text-gray-900">
+                            {account.account_number}
                           </div>
-                        ) : (
-                          <Square className="w-5 h-5 text-gray-400" />
-                        )}
-                        <div className="text-left">
-                          <div className="font-semibold text-gray-900 text-sm">
-                            {templateName}
-                            {department && (
-                              <span className="ml-2 text-xs font-normal text-gray-500">({department})</span>
-                            )}
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            {templateSuggestions.length} account{templateSuggestions.length !== 1 ? 's' : ''}
+                          <div className="text-xs text-gray-500 truncate">
+                            {account.account_name}
                           </div>
                         </div>
-                      </button>
-                    </div>
-
-                    <div className="divide-y divide-gray-100">
-                      {templateSuggestions.map((suggestion) => {
-                        const key = `${suggestion.template_id}-${suggestion.account_id}`
-                        const isSelected = selectedSuggestions.has(key)
-
-                        return (
-                          <label
-                            key={key}
-                            className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer"
-                          >
-                            <input
-                              type="checkbox"
-                              className="rounded border-gray-300"
-                              checked={isSelected}
-                              onChange={() => handleToggleSuggestion(suggestion.template_id, suggestion.account_id)}
-                              disabled={isGenerating}
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium text-gray-900">
-                                {suggestion.account_number}
-                              </div>
-                              <div className="text-xs text-gray-500 truncate">
-                                {suggestion.account_name}
-                              </div>
-                            </div>
-                            {suggestion.estimated_hours && (
-                              <div className="text-xs text-gray-500">
-                                ~{suggestion.estimated_hours}h
-                              </div>
-                            )}
-                          </label>
-                        )
-                      })}
+                      ))}
                     </div>
                   </div>
                 )
@@ -337,7 +298,7 @@ export default function GenerateMissingTasksModal({
             </div>
 
             <p className="text-xs text-gray-500 text-center pt-2">
-              {selectedSuggestions.size} of {suggestions.length} task{suggestions.length !== 1 ? 's' : ''} selected
+              {selectedTemplateIds.size} of {suggestions.length} task{suggestions.length !== 1 ? 's' : ''} selected
             </p>
           </div>
 
@@ -354,7 +315,7 @@ export default function GenerateMissingTasksModal({
               type="button"
               onClick={handleGenerate}
               className="btn-primary flex items-center gap-2"
-              disabled={isGenerating || selectedSuggestions.size === 0}
+              disabled={isGenerating || selectedTemplateIds.size === 0}
             >
               {isGenerating ? (
                 <>
@@ -364,7 +325,7 @@ export default function GenerateMissingTasksModal({
               ) : (
                 <>
                   <Sparkles className="w-4 h-4" />
-                  Generate {selectedSuggestions.size} Task{selectedSuggestions.size !== 1 ? 's' : ''}
+                  Generate {selectedTemplateIds.size} Task{selectedTemplateIds.size !== 1 ? 's' : ''}
                 </>
               )}
             </button>

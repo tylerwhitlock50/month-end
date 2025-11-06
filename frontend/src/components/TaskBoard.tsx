@@ -16,7 +16,7 @@ import { DndProvider, useDrag, useDrop } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
 
 import api from '../lib/api'
-import { formatDate, getStatusColor, getStatusLabel } from '../lib/utils'
+import { formatDate, getStatusColor, getStatusLabel, getNextStatusInFlow, getAdvanceStatusLabel } from '../lib/utils'
 
 interface TaskBoardProps {
   tasks: any[]
@@ -96,6 +96,19 @@ function TaskCard({
     [task.id, task.status]
   )
 
+  const nextStatus = getNextStatusInFlow(task.status)
+  const advanceLabel = getAdvanceStatusLabel(task.status)
+  const isAdvanceDisabled =
+    task.status === 'complete' || nextStatus === task.status || (isMutating && isCurrentTaskMutating)
+  const advanceButtonClasses = clsx(
+    'inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors border',
+    task.status === 'complete'
+      ? 'bg-green-100 text-green-700 border-green-200'
+      : nextStatus === 'complete'
+        ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
+        : 'bg-primary-600 text-white border-primary-600 hover:bg-primary-700'
+  )
+
   const handleExpandToggle = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     onToggleExpand(task.id)
@@ -106,10 +119,11 @@ function TaskCard({
     onStatusChange(task.id, event.target.value)
   }
 
-  const handleMarkComplete = (event: MouseEvent<HTMLButtonElement>) => {
+  const handleAdvanceStatus = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
-    if (task.status !== 'complete') {
-      onStatusChange(task.id, 'complete')
+    const targetStatus = getNextStatusInFlow(task.status)
+    if (targetStatus !== task.status) {
+      onStatusChange(task.id, targetStatus)
     }
   }
 
@@ -233,21 +247,16 @@ function TaskCard({
               </select>
               <button
                 type="button"
-                onClick={handleMarkComplete}
-                disabled={task.status === 'complete' || (isMutating && isCurrentTaskMutating)}
-                className={clsx(
-                  'inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
-                  task.status === 'complete'
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-primary-600 text-white hover:bg-primary-700'
-                )}
+                onClick={handleAdvanceStatus}
+                disabled={isAdvanceDisabled}
+                className={advanceButtonClasses}
               >
                 {isMutating && isCurrentTaskMutating ? (
                   'Saving...'
                 ) : (
                   <>
                     <CheckCircle2 className="h-4 w-4" />
-                    {task.status === 'complete' ? 'Completed' : 'Mark Complete'}
+                    {task.status === 'complete' ? 'Completed' : advanceLabel}
                   </>
                 )}
               </button>
