@@ -6,9 +6,9 @@ services:
     image: postgres:15-alpine
     container_name: monthend_db
     environment:
-      POSTGRES_USER: monthend_user
-      POSTGRES_PASSWORD: monthend_password
-      POSTGRES_DB: monthend_db
+      POSTGRES_USER: ${POSTGRES_USER:-monthend_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-monthend_password}
+      POSTGRES_DB: ${POSTGRES_DB:-monthend_db}
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
@@ -24,7 +24,7 @@ services:
     image: redis:7-alpine
     container_name: monthend_redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -40,10 +40,11 @@ services:
       dockerfile: Dockerfile.backend
     container_name: monthend_backend
     environment:
-      DATABASE_URL: postgresql://monthend_user:monthend_password@db:5432/monthend_db
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: ${DATABASE_URL:-postgresql://monthend_user:monthend_password@db:5432/monthend_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       SECRET_KEY: ${SECRET_KEY:-change-this-secret-key-in-production}
       DEBUG: ${DEBUG:-True}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:3000}
       PYTHONPATH: /app
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -65,9 +66,10 @@ services:
     container_name: monthend_frontend
     environment:
       VITE_API_URL: ${VITE_API_URL:-http://backend:8000}
-      VITE_API_PORT: ${FRONTEND_API_PORT:-8000}
+      VITE_API_PORT: ${VITE_API_PORT:-8000}
+      VITE_BACKEND_PROXY_TARGET: ${VITE_BACKEND_PROXY_TARGET:-http://backend:8000}
     ports:
-      - "5173:5173"
+      - "${FRONTEND_PORT:-5173}:5173"
     volumes:
       - ./frontend:/app
       - /app/node_modules

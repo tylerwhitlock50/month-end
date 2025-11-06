@@ -55,15 +55,28 @@ echo "🗄️  Initializing database..."
 docker-compose exec -T backend python init_db.py --seed
 echo ""
 
+# Read port configuration from .env if it exists
+FRONTEND_PORT=5173
+BACKEND_PORT=8000
+if [ -f .env ]; then
+    # Extract port values from .env file
+    ENV_FRONTEND_PORT=$(grep -E "^FRONTEND_PORT=" .env | cut -d '=' -f2)
+    ENV_BACKEND_PORT=$(grep -E "^BACKEND_PORT=" .env | cut -d '=' -f2)
+    
+    # Use extracted values if they exist
+    [ ! -z "$ENV_FRONTEND_PORT" ] && FRONTEND_PORT=$ENV_FRONTEND_PORT
+    [ ! -z "$ENV_BACKEND_PORT" ] && BACKEND_PORT=$ENV_BACKEND_PORT
+fi
+
 echo "✅ Setup complete!"
 echo ""
 echo "📊 Access the application:"
-echo "   Frontend: http://localhost:5173"
-echo "   Backend API: http://localhost:8000"
-echo "   API Docs: http://localhost:8000/docs"
+echo "   Frontend: http://localhost:$FRONTEND_PORT"
+echo "   Backend API: http://localhost:$BACKEND_PORT"
+echo "   API Docs: http://localhost:$BACKEND_PORT/docs"
 echo ""
 echo "🔐 Default login credentials:"
-echo "   Email: admin@monthend.local"
+echo "   Email: admin@monthend.com"
 echo "   Password: admin123"
 echo ""
 echo "⚠️  Remember to:"

@@ -6,7 +6,8 @@ import os
 
 class Settings(BaseSettings):
     # Database
-    database_url: str = "postgresql://monthend_user:password@localhost:5432/monthend_db"
+    # Default uses docker service name 'db' - override with .env for local development
+    database_url: str = "postgresql://monthend_user:monthend_password@db:5432/monthend_db"
     
     # Security
     secret_key: str = "dev-secret-key-change-in-production"
@@ -35,7 +36,8 @@ class Settings(BaseSettings):
     slack_channel: str = "#finance-close"
     
     # Redis
-    redis_url: str = "redis://localhost:6379/0"
+    # Default uses docker service name 'redis' - override with .env for local development
+    redis_url: str = "redis://redis:6379/0"
     
     # Timezone
     tz: str = "America/New_York"
