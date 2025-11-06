@@ -964,7 +964,7 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
               <div className="flex-1">
                 <h3 className="text-lg font-semibold text-gray-900 mb-1">Delete Task?</h3>
                 <p className="text-sm text-gray-600">
-                  Are you sure you want to delete "{data?.name}"? This action cannot be undone.
+                  Are you sure you want to delete "{taskData?.name || 'this task'}"? This action cannot be undone.
                 </p>
               </div>
             </div>
