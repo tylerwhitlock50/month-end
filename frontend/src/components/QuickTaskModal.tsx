@@ -362,13 +362,16 @@ export default function QuickTaskModal({
           </div>
 
           <div>
-            <label className="label">Instructions / Description</label>
+            <label className="label">Instructions</label>
             <textarea
               className="input min-h-[90px]"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Provide context or steps for this task"
+              placeholder="Describe what needs to be done for this task"
             />
+            <p className="text-xs text-gray-500 mt-1">
+              What should the assignee do to complete this task?
+            </p>
           </div>
 
           <div className="border-t border-gray-200 pt-4">

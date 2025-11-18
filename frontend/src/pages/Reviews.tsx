@@ -11,7 +11,7 @@ import {
   MessageSquare,
   Loader2
 } from 'lucide-react'
-import api, { fetchMyReviews, approveApproval, rejectApproval, requestRevision } from '../lib/api'
+import api, { fetchMyReviews, approveApproval, rejectApproval, requestRevision, reviewTask } from '../lib/api'
 import { formatDate, formatDateTime } from '../lib/utils'
 import { usePeriodStore } from '../stores/periodStore'
 import TaskDetailModal from '../components/TaskDetailModal'
@@ -50,7 +50,7 @@ interface MyReviewsResponse {
 }
 
 interface ActionModalState {
-  type: 'approve' | 'reject' | 'revise' | 'complete' | null
+  type: 'approve' | 'reject' | 'revise' | 'approve_and_complete' | 'request_changes' | 'send_back' | null
   itemId: number | null
   itemType: 'task' | 'approval' | null
   itemName: string
@@ -80,6 +80,20 @@ export default function Reviews() {
     mutationFn: async ({ taskId, status }: { taskId: number; status: string }) => {
       const response = await api.put(`/api/tasks/${taskId}`, { status })
       return response.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['my-reviews'] })
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['review-count'] })
+      setActionModal({ type: null, itemId: null, itemType: null, itemName: '' })
+      setActionNotes('')
+    },
+  })
+
+  const reviewTaskMutation = useMutation({
+    mutationFn: async ({ taskId, action, notes }: { taskId: number; action: 'approve_and_complete' | 'request_changes' | 'send_back'; notes?: string }) => {
+      return reviewTask(taskId, action, notes)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['my-reviews'] })
@@ -137,8 +151,12 @@ export default function Reviews() {
     if (!actionModal.itemId || !actionModal.type) return
 
     if (actionModal.itemType === 'task') {
-      if (actionModal.type === 'complete') {
-        updateTaskMutation.mutate({ taskId: actionModal.itemId, status: 'complete' })
+      if (actionModal.type === 'approve_and_complete' || actionModal.type === 'request_changes' || actionModal.type === 'send_back') {
+        reviewTaskMutation.mutate({
+          taskId: actionModal.itemId,
+          action: actionModal.type,
+          notes: actionNotes || undefined
+        })
       }
     } else if (actionModal.itemType === 'approval') {
       approvalActionMutation.mutate({
@@ -239,7 +257,9 @@ export default function Reviews() {
     if (actionModal.type === 'approve') return 'Approve'
     if (actionModal.type === 'reject') return 'Reject'
     if (actionModal.type === 'revise') return 'Request Changes'
-    if (actionModal.type === 'complete') return 'Mark Complete'
+    if (actionModal.type === 'approve_and_complete') return 'Approve & Complete'
+    if (actionModal.type === 'request_changes') return 'Request Changes'
+    if (actionModal.type === 'send_back') return 'Send Back'
     return 'Confirm'
   }
 
@@ -247,11 +267,13 @@ export default function Reviews() {
     if (actionModal.type === 'approve') return 'Approve Approval Request'
     if (actionModal.type === 'reject') return 'Reject Approval Request'
     if (actionModal.type === 'revise') return 'Request Revision'
-    if (actionModal.type === 'complete') return 'Mark Task Complete'
+    if (actionModal.type === 'approve_and_complete') return 'Approve & Complete Task'
+    if (actionModal.type === 'request_changes') return 'Request Changes to Task'
+    if (actionModal.type === 'send_back') return 'Send Task Back to In Progress'
     return 'Confirm Action'
   }
 
-  const requiresNotes = actionModal.type === 'reject' || actionModal.type === 'revise'
+  const requiresNotes = actionModal.type === 'reject' || actionModal.type === 'revise' || actionModal.type === 'request_changes'
 
   return (
     <div className="space-y-6">
@@ -436,20 +458,35 @@ export default function Reviews() {
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <button
                           onClick={() => setSelectedTaskId(task.id)}
-                          className="btn-secondary text-xs flex-1"
+                          className="btn-secondary text-xs"
                         >
                           View Details
                         </button>
                         <button
-                          onClick={() => openActionModal('complete', task.id, 'task', task.name)}
+                          onClick={() => openActionModal('send_back', task.id, 'task', task.name)}
+                          className="btn-secondary text-xs"
+                          disabled={reviewTaskMutation.isPending}
+                        >
+                          Send Back
+                        </button>
+                        <button
+                          onClick={() => openActionModal('request_changes', task.id, 'task', task.name)}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium text-yellow-700 bg-yellow-50 border border-yellow-300 hover:bg-yellow-100 disabled:opacity-50 transition-colors"
+                          disabled={reviewTaskMutation.isPending}
+                        >
+                          <AlertCircle className="w-3 h-3" />
+                          Request Changes
+                        </button>
+                        <button
+                          onClick={() => openActionModal('approve_and_complete', task.id, 'task', task.name)}
                           className="btn-success text-xs"
-                          disabled={updateTaskMutation.isPending}
+                          disabled={reviewTaskMutation.isPending}
                         >
                           <CheckCircle className="w-3 h-3 mr-1" />
-                          Mark Complete
+                          Approve & Complete
                         </button>
                       </div>
                     </div>

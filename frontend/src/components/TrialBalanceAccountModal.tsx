@@ -700,13 +700,16 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
             </div>
 
             <div className="space-y-2">
-              <label className="label">Description</label>
+              <label className="label">Instructions</label>
               <textarea
                 className="input min-h-[80px]"
                 value={newTaskDescription}
                 onChange={(event) => setNewTaskDescription(event.target.value)}
-                placeholder="Provide instructions or context for the assignee"
+                placeholder="Describe what needs to be done for this task"
               />
+              <p className="text-xs text-gray-500">
+                What should the assignee do to complete this task?
+              </p>
             </div>
 
             <div className="space-y-3">

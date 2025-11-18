@@ -200,6 +200,14 @@ export const requestRevision = async (approvalId: number, notes: string) => {
   return response.data
 }
 
+export const reviewTask = async (taskId: number, action: 'approve_and_complete' | 'request_changes' | 'send_back', notes?: string) => {
+  const response = await api.post(`/api/tasks/${taskId}/review`, {
+    action,
+    notes: notes || null
+  })
+  return response.data
+}
+
 // Workflow Builder API functions
 export const fetchTemplateWorkflow = async (closeType?: string) => {
   const params = closeType ? { close_type: closeType } : {}

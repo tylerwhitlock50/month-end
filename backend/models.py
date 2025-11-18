@@ -26,6 +26,11 @@ class TaskStatus(str, enum.Enum):
     BLOCKED = "blocked"
 
 
+class TaskType(str, enum.Enum):
+    PREP = "prep"
+    VALIDATION = "validation"
+
+
 class PeriodStatus(str, enum.Enum):
     PLANNED = "planned"
     IN_PROGRESS = "in_progress"
@@ -125,6 +130,7 @@ class TaskTemplate(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     close_type = Column(Enum(CloseType), nullable=False)
+    task_type = Column(Enum(TaskType, name='task_type', native_enum=True, values_callable=lambda obj: [e.value for e in obj]), default=TaskType.PREP, nullable=False)
     department = Column(String(100), nullable=True)
     default_owner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     days_offset = Column(Integer, default=0)  # Days relative to period end
@@ -171,6 +177,19 @@ class Task(Base):
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     
+    # Task type and validation fields
+    task_type = Column(Enum(TaskType, name='task_type', native_enum=True, values_callable=lambda obj: [e.value for e in obj]), default=TaskType.PREP, nullable=False)
+    
+    # Review tracking
+    reviewed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Validation fields (for validation tasks)
+    validation_amount = Column(Numeric(18, 2), nullable=True)
+    validation_difference = Column(Numeric(18, 2), nullable=True)
+    validation_matches = Column(Boolean, nullable=True)
+    validation_notes = Column(Text, nullable=True)
+    
     department = Column(String(100), nullable=True)
     entity = Column(String(100), nullable=True)
     priority = Column(Integer, default=5)  # 1-10, 10 being highest
@@ -192,6 +211,7 @@ class Task(Base):
     template = relationship("TaskTemplate", back_populates="tasks")
     owner = relationship("User", back_populates="owned_tasks", foreign_keys=[owner_id])
     assignee = relationship("User", back_populates="assigned_tasks", foreign_keys=[assignee_id])
+    reviewed_by = relationship("User", foreign_keys=[reviewed_by_id])
     files = relationship("File", back_populates="task", cascade="all, delete-orphan")
     approvals = relationship("Approval", back_populates="task", cascade="all, delete-orphan")
     audit_logs = relationship("AuditLog", back_populates="task", cascade="all, delete-orphan")
@@ -276,6 +296,7 @@ class TrialBalanceAccount(Base):
 
     notes = Column(Text, nullable=True)
     is_verified = Column(Boolean, default=False, nullable=False)
+    is_reviewed = Column(Boolean, default=False, nullable=False)
     verified_at = Column(DateTime(timezone=True), nullable=True)
     verified_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 

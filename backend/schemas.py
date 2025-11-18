@@ -2,7 +2,7 @@ from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 from typing import Optional, List, Dict, Any, Literal
 from decimal import Decimal
 from datetime import datetime, date
-from backend.models import UserRole, TaskStatus, PeriodStatus, ApprovalStatus, CloseType
+from backend.models import UserRole, TaskStatus, PeriodStatus, ApprovalStatus, CloseType, TaskType
 
 
 # User Schemas
@@ -72,6 +72,7 @@ class TaskTemplateBase(BaseModel):
     name: str
     description: Optional[str] = None
     close_type: CloseType
+    task_type: TaskType = TaskType.PREP
     department: Optional[str] = None
     default_owner_id: Optional[int] = None
     days_offset: int = 0
@@ -99,6 +100,7 @@ class TaskTemplateCreate(TaskTemplateBase):
 class TaskTemplateUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    task_type: Optional[TaskType] = None
     department: Optional[str] = None
     default_owner_id: Optional[int] = None
     days_offset: Optional[int] = None
@@ -131,6 +133,7 @@ class TaskBase(BaseModel):
     priority: int = Field(5, ge=1, le=10)
     estimated_hours: Optional[float] = None
     notes: Optional[str] = None
+    task_type: TaskType = TaskType.PREP
     position_x: Optional[float] = None
     position_y: Optional[float] = None
 
@@ -156,6 +159,9 @@ class TaskUpdate(BaseModel):
     estimated_hours: Optional[float] = None
     actual_hours: Optional[float] = None
     notes: Optional[str] = None
+    task_type: Optional[TaskType] = None
+    validation_amount: Optional[Decimal] = None
+    validation_notes: Optional[str] = None
     dependency_ids: Optional[List[int]] = None
 
 
@@ -166,6 +172,12 @@ class Task(TaskBase):
     status: TaskStatus
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    reviewed_by_id: Optional[int] = None
+    reviewed_at: Optional[datetime] = None
+    validation_amount: Optional[Decimal] = None
+    validation_difference: Optional[Decimal] = None
+    validation_matches: Optional[bool] = None
+    validation_notes: Optional[str] = None
     actual_hours: Optional[float] = None
     is_recurring: bool
     created_at: datetime
@@ -174,12 +186,17 @@ class Task(TaskBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class TaskReviewAction(BaseModel):
+    action: Literal["approve_and_complete", "request_changes", "send_back"]
+    notes: Optional[str] = None
+
+
 class TaskSummary(BaseModel):
     id: int
     name: str
     status: TaskStatus
     due_date: Optional[datetime] = None
-
+    
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -454,6 +471,33 @@ class PeriodSummary(BaseModel):
     overdue_tasks: int
 
 
+class ValidationIssue(BaseModel):
+    category: Literal["tasks", "approvals", "validations", "trial_balance"]
+    severity: Literal["error", "warning"]
+    message: str
+    count: int
+    item_ids: List[int] = Field(default_factory=list)
+
+
+class ValidationSummaryItem(BaseModel):
+    total: int
+    completed: int = 0
+    incomplete: int = 0
+    matched: Optional[int] = None
+    unmatched: Optional[int] = None
+    pending: Optional[int] = None
+    approved: Optional[int] = None
+    rejected: Optional[int] = None
+    validated: Optional[int] = None
+    unvalidated: Optional[int] = None
+
+
+class PeriodValidationStatus(BaseModel):
+    is_ready_to_close: bool
+    blocking_issues: List[ValidationIssue] = Field(default_factory=list)
+    summary: Dict[str, ValidationSummaryItem]
+
+
 # Review Queue Schemas
 class ReviewTask(BaseModel):
     id: int
@@ -554,11 +598,13 @@ class TrialBalanceAttachment(TrialBalanceAttachmentBase):
 class TrialBalanceAccountBase(BaseModel):
     notes: Optional[str] = None
     is_verified: bool = False
+    is_reviewed: bool = False
 
 
 class TrialBalanceAccountUpdate(BaseModel):
     notes: Optional[str] = None
     is_verified: Optional[bool] = None
+    is_reviewed: Optional[bool] = None
 
 
 class TrialBalanceAccountTasksUpdate(BaseModel):

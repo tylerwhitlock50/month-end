@@ -512,14 +512,60 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
                 />
               </div>
               <div className="space-y-3">
-                <label className="label">Directions / Notes</label>
+                <label className="label">Work Notes</label>
                 <textarea
                   {...register('notes')}
                   className="input min-h-[120px]"
-                  placeholder="Provide step-by-step directions or review notes"
+                  placeholder="Add notes about work performed or internal comments"
                 />
               </div>
             </section>
+
+            {/* Validation Amount (for validation tasks) */}
+            {taskData?.task_type === 'validation' && (
+              <section className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-blue-600" />
+                  Validation Amount
+                </h3>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="label text-sm">Validation Amount *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      {...register('validation_amount')}
+                      className="input"
+                      placeholder="0.00"
+                    />
+                    <p className="text-xs text-gray-600 mt-1">
+                      Enter the calculated/supporting amount to validate against trial balance
+                    </p>
+                  </div>
+                  <div>
+                    <label className="label text-sm">Validation Notes (if unmatched)</label>
+                    <textarea
+                      {...register('validation_notes')}
+                      className="input min-h-[60px]"
+                      placeholder="Explain any differences from trial balance"
+                    />
+                  </div>
+                </div>
+                {taskData?.validation_difference !== null && taskData?.validation_difference !== undefined && (
+                  <div className="mt-3 p-3 bg-white rounded border border-blue-200">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium text-gray-700">Difference:</span>
+                      <span className={`font-semibold ${
+                        taskData.validation_matches ? 'text-green-600' : 'text-yellow-600'
+                      }`}>
+                        ${Math.abs(Number(taskData.validation_difference)).toFixed(2)}
+                        {taskData.validation_matches && ' ✓ Matched'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
 
             <section className="grid gap-4 md:grid-cols-4">
               <div>

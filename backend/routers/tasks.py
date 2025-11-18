@@ -1,5 +1,6 @@
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone, date
+from decimal import Decimal
 import calendar
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
@@ -18,6 +19,8 @@ from backend.models import (
     Approval as ApprovalModel,
     Comment as CommentModel,
     TaskStatus,
+    TaskType,
+    UserRole,
     task_dependencies
 )
 from backend.schemas import (
@@ -25,6 +28,7 @@ from backend.schemas import (
     TaskCreate,
     TaskUpdate,
     TaskWithRelations,
+    TaskReviewAction,
     TaskBulkUpdateRequest,
     TaskBulkUpdateResult,
     TaskBulkDeleteRequest,
@@ -717,6 +721,109 @@ async def bulk_update_tasks(
     return TaskBulkUpdateResult(updated=updated_count)
 
 
+@router.post("/{task_id}/review", response_model=Task)
+async def review_task(
+    task_id: int,
+    review_action: TaskReviewAction,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """
+    Perform a review action on a task in REVIEW status.
+    
+    Actions:
+    - approve_and_complete: Approve and mark task as complete
+    - request_changes: Send task back to IN_PROGRESS with notes
+    - send_back: Send task back to IN_PROGRESS without requiring notes
+    """
+    task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Verify task is in REVIEW status
+    if task.status != TaskStatus.REVIEW:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Task must be in REVIEW status to perform review actions. Current status: {task.status.value}"
+        )
+    
+    # Verify user is owner or assignee (or admin/reviewer role)
+    is_task_participant = current_user.id in [task.owner_id, task.assignee_id]
+    is_privileged = current_user.role in [UserRole.ADMIN, UserRole.REVIEWER]
+    
+    if not (is_task_participant or is_privileged):
+        raise HTTPException(
+            status_code=403,
+            detail="Only task owner, assignee, or reviewers can perform review actions"
+        )
+    
+    # Validate notes requirement
+    if review_action.action == "request_changes" and not review_action.notes:
+        raise HTTPException(
+            status_code=400,
+            detail="Notes are required when requesting changes"
+        )
+    
+    old_status = task.status
+    
+    # Perform the review action
+    if review_action.action == "approve_and_complete":
+        task.status = TaskStatus.COMPLETE
+        task.completed_at = datetime.utcnow()
+        task.reviewed_by_id = current_user.id
+        task.reviewed_at = datetime.utcnow()
+        action_description = "approved and completed"
+        
+    elif review_action.action in ["request_changes", "send_back"]:
+        task.status = TaskStatus.IN_PROGRESS
+        action_description = "requested changes for" if review_action.action == "request_changes" else "sent back"
+    else:
+        raise HTTPException(status_code=400, detail="Invalid review action")
+    
+    # Log the review action
+    audit_log = AuditLogModel(
+        task_id=task.id,
+        user_id=current_user.id,
+        action="task_reviewed",
+        entity_type="task",
+        entity_id=task.id,
+        old_value=old_status.value,
+        new_value=task.status.value,
+        details=f"Review action: {action_description}. {review_action.notes or ''}"
+    )
+    db.add(audit_log)
+    
+    # Notify relevant users
+    if review_action.action == "approve_and_complete":
+        # Notify assignee if different from reviewer
+        if task.assignee_id and task.assignee_id != current_user.id:
+            NotificationService.create_notification(
+                db,
+                user_id=task.assignee_id,
+                title="Task approved",
+                message=f"'{task.name}' has been approved and completed.",
+                notification_type="task_completed",
+                link_url=f"/tasks?highlight={task.id}",
+            )
+    else:
+        # Notify assignee or owner about changes requested
+        notify_user_id = task.assignee_id or task.owner_id
+        if notify_user_id and notify_user_id != current_user.id:
+            NotificationService.create_notification(
+                db,
+                user_id=notify_user_id,
+                title="Changes requested",
+                message=f"Changes requested for '{task.name}': {review_action.notes or 'Please review'}",
+                notification_type="task_revision_requested",
+                link_url=f"/tasks?mine=1&highlight={task.id}",
+            )
+    
+    db.commit()
+    db.refresh(task)
+    
+    return task
+
+
 @router.put("/{task_id}", response_model=Task)
 async def update_task(
     task_id: int,
@@ -735,6 +842,32 @@ async def update_task(
     # Track status changes
     old_status = task.status
     
+    # Prevent direct status changes from REVIEW to COMPLETE without proper review
+    if (task.status == TaskStatus.REVIEW and 
+        task_update.status == TaskStatus.COMPLETE and 
+        old_status == TaskStatus.REVIEW):
+        
+        # Check if all pending approvals are approved
+        pending_approvals = db.query(ApprovalModel).filter(
+            ApprovalModel.task_id == task.id,
+            ApprovalModel.status == "pending"
+        ).count()
+        
+        # Allow if: no pending approvals OR user is admin/reviewer
+        is_privileged = current_user.role in [UserRole.ADMIN, UserRole.REVIEWER]
+        
+        if pending_approvals > 0 and not is_privileged:
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot complete task in review status with pending approvals. Use the review endpoint to approve the task or wait for all approvals."
+            )
+        
+        if pending_approvals == 0 and not is_privileged:
+            raise HTTPException(
+                status_code=403,
+                detail="Tasks in REVIEW status must be completed through the review endpoint (/tasks/{task_id}/review). This ensures proper audit trail."
+            )
+    
     for field, value in update_data.items():
         old_value = getattr(task, field)
         setattr(task, field, value)
@@ -748,6 +881,43 @@ async def update_task(
                 task.started_at = datetime.utcnow()
             elif value == TaskStatus.COMPLETE and not task.completed_at:
                 task.completed_at = datetime.utcnow()
+                
+                # Validation logic for validation tasks
+                if task.task_type == TaskType.VALIDATION:
+                    # Check if validation_amount is provided
+                    if task.validation_amount is None:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Validation tasks require a validation_amount before completion"
+                        )
+                    
+                    # Calculate validation difference based on linked trial balance accounts
+                    from backend.models import TrialBalanceAccount as TBAccountModel
+                    tb_accounts = db.query(TBAccountModel).join(
+                        TBAccountModel.tasks
+                    ).filter(TaskModel.id == task.id).all()
+                    
+                    if tb_accounts:
+                        # Sum up the ending balances of all linked accounts
+                        tb_total = sum(
+                            acc.ending_balance for acc in tb_accounts 
+                            if acc.ending_balance is not None
+                        )
+                        task.validation_difference = task.validation_amount - Decimal(str(tb_total))
+                        
+                        # Consider matched if difference is within $0.01
+                        task.validation_matches = abs(task.validation_difference) <= Decimal('0.01')
+                        
+                        # If doesn't match, require validation notes
+                        if not task.validation_matches and not task.validation_notes:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Validation amount ${task.validation_amount} doesn't match trial balance total ${tb_total} (difference: ${task.validation_difference}). Please provide validation_notes explaining the difference."
+                            )
+                    else:
+                        # No linked accounts - just store the amount
+                        task.validation_difference = Decimal('0')
+                        task.validation_matches = True
 
             if value == TaskStatus.REVIEW and task.owner_id and task.owner_id != current_user.id:
                 NotificationService.create_notification(

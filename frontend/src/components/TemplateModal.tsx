@@ -193,12 +193,15 @@ export default function TemplateModal({ onClose, onSuccess, template }: Template
           </div>
 
           <div>
-            <label className="label">Description</label>
+            <label className="label">Task Instructions</label>
             <textarea
               className="input min-h-[100px]"
-              placeholder="Outline what this task covers and expected outcome."
+              placeholder="Describe what needs to be done and the expected outcome."
               {...register('description')}
             />
+            <p className="text-xs text-gray-500 mt-1">
+              These instructions will be copied to tasks created from this template.
+            </p>
           </div>
 
           <div>

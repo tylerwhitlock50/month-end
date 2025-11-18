@@ -15,6 +15,9 @@ from backend.models import (
     User as UserModel,
     UserRole,
     TaskStatus,
+    TaskType,
+    ApprovalStatus,
+    Approval as ApprovalModel,
     File as FileModel,
     TrialBalance as TrialBalanceModel,
     TrialBalanceAccount as TrialBalanceAccountModel,
@@ -30,6 +33,9 @@ from backend.schemas import (
     PeriodSummary,
     TaskSummary,
     DepartmentSummary,
+    PeriodValidationStatus,
+    ValidationIssue,
+    ValidationSummaryItem,
 )
 
 router = APIRouter(prefix="/api/periods", tags=["periods"])
@@ -360,6 +366,33 @@ async def update_period(
         raise HTTPException(status_code=404, detail="Period not found")
     
     update_data = period_update.model_dump(exclude_unset=True)
+    
+    # Validate before allowing period to be closed
+    from backend.models import PeriodStatus
+    if "status" in update_data and update_data["status"] == PeriodStatus.CLOSED:
+        # Call validation endpoint logic inline to check readiness
+        validation_status = await get_period_validation_status(period_id, db, current_user)
+        
+        if not validation_status.is_ready_to_close:
+            # Build error message with all blocking issues
+            error_details = {
+                "message": "Period cannot be closed due to incomplete items",
+                "blocking_issues": [
+                    {
+                        "category": issue.category,
+                        "severity": issue.severity,
+                        "message": issue.message,
+                        "count": issue.count
+                    }
+                    for issue in validation_status.blocking_issues
+                    if issue.severity == "error"
+                ]
+            }
+            raise HTTPException(
+                status_code=400,
+                detail=error_details
+            )
+    
     for field, value in update_data.items():
         setattr(period, field, value)
     
@@ -384,6 +417,164 @@ async def set_period_activation(
     db.refresh(period)
 
     return period
+
+
+@router.get("/{period_id}/validation-status", response_model=PeriodValidationStatus)
+async def get_period_validation_status(
+    period_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """
+    Get comprehensive validation status for period close readiness.
+    Checks all tasks, approvals, validations, and trial balance completeness.
+    """
+    period = db.query(PeriodModel).filter(PeriodModel.id == period_id).first()
+    if not period:
+        raise HTTPException(status_code=404, detail="Period not found")
+    
+    blocking_issues: List[ValidationIssue] = []
+    summary = {}
+    
+    # Get all tasks for the period
+    all_tasks = db.query(TaskModel).filter(TaskModel.period_id == period_id).all()
+    
+    # 1. Check prep tasks
+    prep_tasks = [t for t in all_tasks if t.task_type == TaskType.PREP]
+    prep_incomplete = [t for t in prep_tasks if t.status != TaskStatus.COMPLETE]
+    
+    summary["prep_tasks"] = ValidationSummaryItem(
+        total=len(prep_tasks),
+        completed=len(prep_tasks) - len(prep_incomplete),
+        incomplete=len(prep_incomplete)
+    )
+    
+    if prep_incomplete:
+        blocking_issues.append(ValidationIssue(
+            category="tasks",
+            severity="error",
+            message=f"{len(prep_incomplete)} prep task(s) not completed",
+            count=len(prep_incomplete),
+            item_ids=[t.id for t in prep_incomplete]
+        ))
+    
+    # 2. Check validation tasks
+    validation_tasks = [t for t in all_tasks if t.task_type == TaskType.VALIDATION]
+    validation_incomplete = [t for t in validation_tasks if t.status != TaskStatus.COMPLETE]
+    validation_complete = [t for t in validation_tasks if t.status == TaskStatus.COMPLETE]
+    validation_matched = [t for t in validation_complete if t.validation_matches is True]
+    validation_unmatched = [
+        t for t in validation_complete 
+        if t.validation_matches is False and not t.validation_notes
+    ]
+    
+    summary["validation_tasks"] = ValidationSummaryItem(
+        total=len(validation_tasks),
+        completed=len(validation_complete),
+        incomplete=len(validation_incomplete),
+        matched=len(validation_matched),
+        unmatched=len([t for t in validation_complete if t.validation_matches is False])
+    )
+    
+    if validation_incomplete:
+        blocking_issues.append(ValidationIssue(
+            category="validations",
+            severity="error",
+            message=f"{len(validation_incomplete)} validation task(s) not completed",
+            count=len(validation_incomplete),
+            item_ids=[t.id for t in validation_incomplete]
+        ))
+    
+    if validation_unmatched:
+        blocking_issues.append(ValidationIssue(
+            category="validations",
+            severity="error",
+            message=f"{len(validation_unmatched)} validation task(s) have unmatched amounts without notes",
+            count=len(validation_unmatched),
+            item_ids=[t.id for t in validation_unmatched]
+        ))
+    
+    # 3. Check approvals
+    all_approvals = db.query(ApprovalModel).join(
+        TaskModel
+    ).filter(TaskModel.period_id == period_id).all()
+    
+    approved = [a for a in all_approvals if a.status == ApprovalStatus.APPROVED]
+    pending = [a for a in all_approvals if a.status == ApprovalStatus.PENDING]
+    rejected = [a for a in all_approvals if a.status == ApprovalStatus.REJECTED]
+    
+    summary["approvals"] = ValidationSummaryItem(
+        total=len(all_approvals),
+        approved=len(approved),
+        pending=len(pending),
+        rejected=len(rejected)
+    )
+    
+    if pending:
+        blocking_issues.append(ValidationIssue(
+            category="approvals",
+            severity="error",
+            message=f"{len(pending)} approval(s) still pending",
+            count=len(pending),
+            item_ids=[a.id for a in pending]
+        ))
+    
+    # 4. Check trial balance accounts
+    trial_balances = db.query(TrialBalanceModel).filter(
+        TrialBalanceModel.period_id == period_id
+    ).all()
+    
+    all_tb_accounts = []
+    for tb in trial_balances:
+        accounts = db.query(TrialBalanceAccountModel).filter(
+            TrialBalanceAccountModel.trial_balance_id == tb.id
+        ).all()
+        all_tb_accounts.extend(accounts)
+    
+    # Consider an account validated if it's verified OR reviewed OR has validation tasks
+    validated_accounts = []
+    unvalidated_accounts = []
+    
+    for account in all_tb_accounts:
+        # Get validation tasks linked to this account
+        validation_tasks_for_account = db.query(TaskModel).join(
+            TaskModel.trial_balance_accounts
+        ).filter(
+            TrialBalanceAccountModel.id == account.id,
+            TaskModel.task_type == TaskType.VALIDATION,
+            TaskModel.status == TaskStatus.COMPLETE
+        ).count()
+        
+        if account.is_verified or account.is_reviewed or validation_tasks_for_account > 0:
+            validated_accounts.append(account)
+        else:
+            unvalidated_accounts.append(account)
+    
+    summary["trial_balance"] = ValidationSummaryItem(
+        total=len(all_tb_accounts),
+        validated=len(validated_accounts),
+        unvalidated=len(unvalidated_accounts)
+    )
+    
+    # Unvalidated accounts are warnings, not errors (might be immaterial)
+    if unvalidated_accounts:
+        blocking_issues.append(ValidationIssue(
+            category="trial_balance",
+            severity="warning",
+            message=f"{len(unvalidated_accounts)} trial balance account(s) without validation",
+            count=len(unvalidated_accounts),
+            item_ids=[a.id for a in unvalidated_accounts]
+        ))
+    
+    # Determine if ready to close (only error-level issues block close)
+    error_issues = [issue for issue in blocking_issues if issue.severity == "error"]
+    is_ready_to_close = len(error_issues) == 0
+    
+    return PeriodValidationStatus(
+        is_ready_to_close=is_ready_to_close,
+        blocking_issues=blocking_issues,
+        summary=summary
+    )
 
 
 @router.delete("/{period_id}", status_code=status.HTTP_204_NO_CONTENT)
