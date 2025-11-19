@@ -74,6 +74,7 @@ class TaskTemplateBase(BaseModel):
     close_type: CloseType
     task_type: TaskType = TaskType.PREP
     department: Optional[str] = None
+    category: Optional[str] = None
     default_owner_id: Optional[int] = None
     days_offset: int = 0
     estimated_hours: Optional[float] = None
@@ -130,6 +131,7 @@ class TaskBase(BaseModel):
     due_date: Optional[datetime] = None
     department: Optional[str] = None
     entity: Optional[str] = None
+    category: Optional[str] = None
     priority: int = Field(5, ge=1, le=10)
     estimated_hours: Optional[float] = None
     notes: Optional[str] = None
@@ -755,6 +757,7 @@ class TaskWithFiles(BaseModel):
     id: int
     name: str
     status: TaskStatus
+    category: Optional[str] = None
     files: List[FileWithUser] = []
     
     model_config = ConfigDict(from_attributes=True)
@@ -777,10 +780,16 @@ class TrialBalanceFileInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class TaskCategory(BaseModel):
+    """Category grouping for tasks in File Cabinet"""
+    category: str
+    tasks: List[TaskWithFiles] = []
+
+
 class FileCabinetStructure(BaseModel):
     period: Period
     period_files: List[FileWithUser] = []
-    task_files: List[TaskWithFiles] = []
+    task_files: List[TaskCategory] = []
     trial_balance_files: List[TrialBalanceFileInfo] = []
 
 

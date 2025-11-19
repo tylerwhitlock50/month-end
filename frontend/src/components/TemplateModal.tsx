@@ -173,10 +173,34 @@ export default function TemplateModal({ onClose, onSuccess, template }: Template
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-3">
             <div>
               <label className="label">Department</label>
               <input className="input" placeholder="e.g., Accounting" {...register('department')} />
+            </div>
+
+            <div>
+              <label className="label">Category</label>
+              <input 
+                className="input" 
+                placeholder="e.g., Cash & Bank" 
+                {...register('category')}
+                list="category-suggestions"
+              />
+              <datalist id="category-suggestions">
+                <option value="Cash & Bank" />
+                <option value="Accounts Receivable" />
+                <option value="Inventory" />
+                <option value="Accounts Payable" />
+                <option value="Fixed Assets" />
+                <option value="Accruals" />
+                <option value="Revenue" />
+                <option value="Expenses" />
+                <option value="Prepaids & Deferrals" />
+                <option value="Tax" />
+                <option value="Payroll" />
+                <option value="General" />
+              </datalist>
             </div>
 
             <div>

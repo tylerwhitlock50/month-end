@@ -102,18 +102,37 @@ def _build_file_cabinet_structure(db: Session, period: PeriodModel) -> FileCabin
     period_files_with_user = [_with_user(file) for file in period_files]
 
     tasks = db.query(TaskModel).filter(TaskModel.period_id == period_id).all()
-    task_files_list = []
+    
+    # Group tasks by category
+    tasks_by_category = {}
     for task in tasks:
         task_files = db.query(FileModel).filter(FileModel.task_id == task.id).all()
         files_with_user = [_with_user(file) for file in task_files]
-        task_files_list.append(
+        
+        # Use category or default to "General"
+        category = task.category or "General"
+        
+        if category not in tasks_by_category:
+            tasks_by_category[category] = []
+        
+        tasks_by_category[category].append(
             {
                 "id": task.id,
                 "name": task.name,
                 "status": task.status,
+                "category": task.category,
                 "files": files_with_user,
             }
         )
+    
+    # Convert to list format for response
+    task_files_list = [
+        {
+            "category": category,
+            "tasks": task_list
+        }
+        for category, task_list in sorted(tasks_by_category.items())
+    ]
 
     trial_balance_files = []
     trial_balances = db.query(TrialBalanceModel).filter(

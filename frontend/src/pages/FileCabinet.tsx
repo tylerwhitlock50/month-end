@@ -57,7 +57,13 @@ interface TaskWithFiles {
   id: number
   name: string
   status: string
+  category?: string
   files: FileInfo[]
+}
+
+interface TaskCategory {
+  category: string
+  tasks: TaskWithFiles[]
 }
 
 interface TrialBalanceFile {
@@ -78,7 +84,7 @@ interface TrialBalanceFile {
 interface FileCabinetData {
   period: Period
   period_files: FileInfo[]
-  task_files: TaskWithFiles[]
+  task_files: TaskCategory[]
   trial_balance_files: TrialBalanceFile[]
 }
 
@@ -257,9 +263,11 @@ export default function FileCabinet() {
     )
   }
 
-  const renderPriorTaskFiles = (tasks: TaskWithFiles[]) => {
-    const allFiles = tasks.flatMap((task) =>
-      task.files.map((file) => ({ ...file, taskName: task.name }))
+  const renderPriorTaskFiles = (taskCategories: TaskCategory[]) => {
+    const allFiles = taskCategories.flatMap((category) =>
+      (category.tasks || []).flatMap((task) =>
+        (task.files || []).map((file) => ({ ...file, taskName: task.name }))
+      )
     )
 
     if (allFiles.length === 0) {
@@ -675,7 +683,7 @@ export default function FileCabinet() {
                 )}
                 <span className="text-gray-700">Task Files</span>
                 <span className="ml-2 text-xs text-gray-500">
-                  ({cabinetData.task_files.length} tasks)
+                  ({cabinetData.task_files.reduce((acc, cat) => acc + (cat.tasks?.length || 0), 0)} tasks)
                 </span>
               </div>
               {expandedSections.has('tasks') && (
@@ -685,39 +693,70 @@ export default function FileCabinet() {
                       No tasks with files
                     </div>
                   ) : (
-                    cabinetData.task_files.map((task) => (
-                      <div key={task.id}>
-                        {/* Task Folder */}
+                    cabinetData.task_files.map((category) => category.tasks && (
+                      <div key={category.category}>
+                        {/* Category Folder */}
                         <div
                           className="flex items-center px-3 py-1.5 hover:bg-gray-50 cursor-pointer select-none"
                           style={{ paddingLeft: '40px' }}
-                          onClick={() => toggleFolder(`task-${task.id}`)}
+                          onClick={() => toggleFolder(`category-${category.category}`)}
                         >
-                          {expandedSections.has(`task-${task.id}`) ? (
+                          {expandedSections.has(`category-${category.category}`) ? (
                             <ChevronDown className="w-4 h-4 text-gray-500 mr-1" />
                           ) : (
                             <ChevronRight className="w-4 h-4 text-gray-500 mr-1" />
                           )}
-                          {expandedSections.has(`task-${task.id}`) ? (
-                            <Folder className="w-4 h-4 text-blue-500 mr-2" />
+                          {expandedSections.has(`category-${category.category}`) ? (
+                            <FolderOpen className="w-4 h-4 text-purple-500 mr-2" />
                           ) : (
-                            <FolderClosed className="w-4 h-4 text-blue-500 mr-2" />
+                            <FolderClosed className="w-4 h-4 text-purple-500 mr-2" />
                           )}
-                          <span className="text-gray-700">{task.name}</span>
+                          <span className="text-gray-700 font-medium">{category.category}</span>
                           <span className="ml-2 text-xs text-gray-500">
-                            ({task.files.length})
+                            ({category.tasks?.length || 0} tasks)
                           </span>
                         </div>
-                        {/* Task Files */}
-                        {expandedSections.has(`task-${task.id}`) && (
+                        
+                        {/* Tasks within Category */}
+                        {expandedSections.has(`category-${category.category}`) && (
                           <div>
-                            {task.files.length === 0 ? (
-                              <div className="px-3 py-1 text-xs text-gray-500 italic" style={{ paddingLeft: '80px' }}>
-                                No files
+                            {(category.tasks || []).map((task) => (
+                              <div key={task.id}>
+                                {/* Task Folder */}
+                                <div
+                                  className="flex items-center px-3 py-1.5 hover:bg-gray-50 cursor-pointer select-none"
+                                  style={{ paddingLeft: '60px' }}
+                                  onClick={() => toggleFolder(`task-${task.id}`)}
+                                >
+                                  {expandedSections.has(`task-${task.id}`) ? (
+                                    <ChevronDown className="w-4 h-4 text-gray-500 mr-1" />
+                                  ) : (
+                                    <ChevronRight className="w-4 h-4 text-gray-500 mr-1" />
+                                  )}
+                                  {expandedSections.has(`task-${task.id}`) ? (
+                                    <Folder className="w-4 h-4 text-blue-500 mr-2" />
+                                  ) : (
+                                    <FolderClosed className="w-4 h-4 text-blue-500 mr-2" />
+                                  )}
+                                  <span className="text-gray-700">{task.name}</span>
+                                  <span className="ml-2 text-xs text-gray-500">
+                                    ({task.files?.length || 0})
+                                  </span>
+                                </div>
+                                {/* Task Files */}
+                                {expandedSections.has(`task-${task.id}`) && (
+                                  <div>
+                                    {(!task.files || task.files.length === 0) ? (
+                                      <div className="px-3 py-1 text-xs text-gray-500 italic" style={{ paddingLeft: '100px' }}>
+                                        No files
+                                      </div>
+                                    ) : (
+                                      task.files.map((file) => renderFileRow(file, 4))
+                                    )}
+                                  </div>
+                                )}
                               </div>
-                            ) : (
-                              task.files.map((file) => renderFileRow(file, 3))
-                            )}
+                            ))}
                           </div>
                         )}
                       </div>
@@ -777,7 +816,7 @@ export default function FileCabinet() {
           isOpen={uploadModalOpen}
           onClose={() => setUploadModalOpen(false)}
           periodId={selectedPeriod!}
-          tasks={cabinetData.task_files.map((t) => ({ id: t.id, name: t.name }))}
+          tasks={cabinetData.task_files.flatMap((cat) => (cat.tasks || []).map((t) => ({ id: t.id, name: t.name })))}
           onUploadComplete={loadFileCabinetData}
         />
       )}

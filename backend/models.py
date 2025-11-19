@@ -132,6 +132,7 @@ class TaskTemplate(Base):
     close_type = Column(Enum(CloseType), nullable=False)
     task_type = Column(Enum(TaskType, name='task_type', native_enum=True, values_callable=lambda obj: [e.value for e in obj]), default=TaskType.PREP, nullable=False)
     department = Column(String(100), nullable=True)
+    category = Column(String(100), nullable=True)  # For File Cabinet organization
     default_owner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     days_offset = Column(Integer, default=0)  # Days relative to period end
     estimated_hours = Column(Float, nullable=True)
@@ -192,6 +193,7 @@ class Task(Base):
     
     department = Column(String(100), nullable=True)
     entity = Column(String(100), nullable=True)
+    category = Column(String(100), nullable=True)  # For File Cabinet organization
     priority = Column(Integer, default=5)  # 1-10, 10 being highest
     estimated_hours = Column(Float, nullable=True)
     actual_hours = Column(Float, nullable=True)

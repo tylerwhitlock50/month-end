@@ -600,6 +600,39 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
             </section>
 
             <section className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="label">Category</label>
+                <input 
+                  {...register('category')} 
+                  className="input" 
+                  placeholder="e.g., Cash & Bank, Accounts Receivable"
+                  list="category-suggestions"
+                />
+                <datalist id="category-suggestions">
+                  <option value="Cash & Bank" />
+                  <option value="Accounts Receivable" />
+                  <option value="Inventory" />
+                  <option value="Accounts Payable" />
+                  <option value="Fixed Assets" />
+                  <option value="Accruals" />
+                  <option value="Revenue" />
+                  <option value="Expenses" />
+                  <option value="Prepaids & Deferrals" />
+                  <option value="Tax" />
+                  <option value="Payroll" />
+                  <option value="General" />
+                </datalist>
+                <p className="text-xs text-gray-500 mt-1">
+                  Groups tasks in File Cabinet for easier organization
+                </p>
+              </div>
+              <div>
+                <label className="label">Department</label>
+                <input {...register('department')} className="input" placeholder="e.g., Accounting, Finance" />
+              </div>
+            </section>
+
+            <section className="grid gap-4 md:grid-cols-2">
               <div className="border border-gray-200 rounded-lg p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
