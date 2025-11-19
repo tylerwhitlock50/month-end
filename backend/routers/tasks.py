@@ -138,6 +138,7 @@ def _map_task_to_summary(task: TaskModel) -> TaskSummary:
         id=task.id,
         name=task.name,
         status=task.status,
+        task_type=task.task_type,
         due_date=task.due_date,
     )
 

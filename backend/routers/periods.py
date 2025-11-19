@@ -216,7 +216,7 @@ async def get_period_detail(
         status_key = task.status.value if isinstance(task.status, TaskStatus) else str(task.status)
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
         tasks_by_status.setdefault(status_key, []).append(
-            TaskSummary(id=task.id, name=task.name, status=task.status, due_date=task.due_date)
+            TaskSummary(id=task.id, name=task.name, status=task.status, task_type=task.task_type, due_date=task.due_date)
         )
 
         department_key = task.department or 'Unassigned'
@@ -230,12 +230,12 @@ async def get_period_detail(
     upcoming_cutoff = now + timedelta(days=3)
 
     overdue_tasks = [
-        TaskSummary(id=task.id, name=task.name, status=task.status, due_date=task.due_date)
+        TaskSummary(id=task.id, name=task.name, status=task.status, task_type=task.task_type, due_date=task.due_date)
         for task in tasks
         if task.status != TaskStatus.COMPLETE and task.due_date and task.due_date < now
     ]
     upcoming_tasks = [
-        TaskSummary(id=task.id, name=task.name, status=task.status, due_date=task.due_date)
+        TaskSummary(id=task.id, name=task.name, status=task.status, task_type=task.task_type, due_date=task.due_date)
         for task in tasks
         if task.status != TaskStatus.COMPLETE and task.due_date and now <= task.due_date <= upcoming_cutoff
     ]

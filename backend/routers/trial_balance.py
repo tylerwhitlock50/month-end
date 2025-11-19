@@ -54,6 +54,7 @@ from backend.schemas import (
     MissingTaskSuggestion,
 )
 from backend.services.trial_balance_linker import auto_link_tasks_to_trial_balance_accounts
+from backend.services.reconciliation_tag_parser import extract_reconciliation_values
 from backend.services.netsuite_parser import parse_netsuite_trial_balance
 
 
@@ -514,6 +515,9 @@ async def import_trial_balance(
     created_accounts = []
 
     for account in accounts_to_create:
+        # Generate unique reconciliation tag for automatic value extraction
+        reconciliation_tag = f"TB-{period_id}-{account['account_number']}"
+        
         account_model = TrialBalanceAccountModel(
             trial_balance_id=trial_balance.id,
             account_number=account["account_number"],
@@ -521,7 +525,8 @@ async def import_trial_balance(
             account_type=account["account_type"],
             debit=account["debit"],
             credit=account["credit"],
-            ending_balance=account["ending_balance"]
+            ending_balance=account["ending_balance"],
+            reconciliation_tag=reconciliation_tag
         )
         db.add(account_model)
         created_accounts.append(account_model)
@@ -1024,25 +1029,27 @@ async def update_account_tasks(
     return account
 
 
-@router.post("/accounts/{account_id}/validations", response_model=TrialBalanceValidation, status_code=status.HTTP_201_CREATED)
+@router.post("/accounts/{account_id}/validations", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def create_validation(
     account_id: int,
     task_id: Optional[int] = Form(None),
-    supporting_amount: str = Form(...),
+    supporting_amount: Optional[str] = Form(None),
     notes: Optional[str] = Form(None),
     file: Optional[UploadFile] = FastAPIFile(None),
     file_date: Optional[str] = Form(None),
     db: Session = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    """
+    Create a validation for a trial balance account.
+    
+    If a file is uploaded (Excel/CSV), the system will attempt to extract
+    the reconciliation value automatically by finding the account's tag.
+    The extracted value can be overridden by providing supporting_amount.
+    """
     account = db.query(TrialBalanceAccountModel).options(selectinload(TrialBalanceAccountModel.trial_balance)).filter(TrialBalanceAccountModel.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Trial balance account not found")
-
-    try:
-        supporting_amount_decimal = Decimal(supporting_amount)
-    except (InvalidOperation, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid supporting amount")
 
     linked_task = None
     if task_id is not None:
@@ -1060,7 +1067,11 @@ async def create_validation(
     file_size = None
     mime_type = None
     parsed_file_date = None
+    auto_extracted = False
+    extraction_errors = []
+    supporting_amount_decimal = None
 
+    # Try to extract value from file if uploaded
     max_size_bytes = settings.max_file_size_mb * 1024 * 1024
     if file is not None:
         file.file.seek(0, 2)
@@ -1073,6 +1084,39 @@ async def create_validation(
             )
 
         file_bytes = await file.read()
+        
+        # Attempt automatic extraction if file is Excel or CSV
+        filename = (file.filename or "").lower()
+        if filename.endswith(('.xlsx', '.xls', '.csv')) and account.reconciliation_tag:
+            period_id = account.trial_balance.period_id if account.trial_balance else None
+            extracted_tags, errors = extract_reconciliation_values(
+                file_bytes,
+                file.filename or "support",
+                period_id=period_id
+            )
+            extraction_errors = errors
+            
+            # Check if this account's tag was found
+            if account.reconciliation_tag in extracted_tags:
+                extracted_value = extracted_tags[account.reconciliation_tag]
+                
+                # Use extracted value if no manual amount provided
+                if supporting_amount is None or supporting_amount.strip() == "":
+                    supporting_amount_decimal = extracted_value
+                    auto_extracted = True
+                    
+                    # Auto-link to validation task if no task_id provided and one exists
+                    if task_id is None and account.tasks:
+                        # Find validation tasks linked to this account
+                        validation_tasks = [
+                            t for t in account.tasks 
+                            if t.task_type == TaskType.VALIDATION
+                        ]
+                        if validation_tasks:
+                            # Use the first validation task found
+                            task_id = validation_tasks[0].id
+                            linked_task = validation_tasks[0]
+        
         stored_filename, file_path, relative_path = _store_validation_file(
             account.trial_balance_id,
             account.id,
@@ -1081,6 +1125,18 @@ async def create_validation(
         )
         file_size = len(file_bytes)
         mime_type = file.content_type
+
+    # Parse supporting_amount if not auto-extracted
+    if supporting_amount_decimal is None:
+        if supporting_amount is None or supporting_amount.strip() == "":
+            raise HTTPException(
+                status_code=400,
+                detail="Supporting amount is required. Either provide a value or upload a file with the reconciliation tag."
+            )
+        try:
+            supporting_amount_decimal = Decimal(supporting_amount)
+        except (InvalidOperation, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid supporting amount")
 
     if file_date:
         try:
@@ -1106,10 +1162,46 @@ async def create_validation(
         evidence_file_date=parsed_file_date
     )
     db.add(validation)
+    
+    # Sync validation data to task if linked to validation task
+    if linked_task and linked_task.task_type == TaskType.VALIDATION:
+        linked_task.validation_amount = supporting_amount_decimal
+        linked_task.validation_difference = difference
+        linked_task.validation_matches = matches
+        if notes:
+            linked_task.validation_notes = notes
+    
     db.commit()
     db.refresh(validation)
 
-    return validation
+    # Return validation with extraction metadata
+    # Convert SQLAlchemy model to Pydantic schema for proper serialization
+    from backend.schemas import TrialBalanceValidation as TrialBalanceValidationSchema
+    
+    validation_dict = {
+        "id": validation.id,
+        "account_id": validation.account_id,
+        "task_id": validation.task_id,
+        "supporting_amount": validation.supporting_amount,
+        "difference": validation.difference,
+        "matches_balance": validation.matches_balance,
+        "notes": validation.notes,
+        "evidence_original_filename": validation.evidence_original_filename,
+        "evidence_size": validation.evidence_size,
+        "evidence_mime_type": validation.evidence_mime_type,
+        "evidence_file_date": validation.evidence_file_date,
+        "evidence_uploaded_at": validation.evidence_uploaded_at,
+        "evidence_url": validation.evidence_url,
+        "created_at": validation.created_at,
+        "updated_at": validation.updated_at,
+    }
+    
+    return {
+        "validation": validation_dict,
+        "auto_extracted": auto_extracted,
+        "reconciliation_tag": account.reconciliation_tag,
+        "extraction_errors": extraction_errors
+    }
 
 
 @router.patch("/validations/{validation_id}", response_model=TrialBalanceValidation)
@@ -1215,6 +1307,155 @@ async def delete_validation(
 
     db.delete(validation)
     db.commit()
+
+
+@router.post("/validations/bulk", response_model=dict, status_code=status.HTTP_201_CREATED)
+async def create_bulk_validations(
+    period_id: int = Form(...),
+    file: UploadFile = FastAPIFile(...),
+    file_date: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """
+    Create multiple validations from a single file containing multiple reconciliation tags.
+    
+    This endpoint scans the uploaded file for all reconciliation tags matching the period,
+    and creates a validation for each tag found with the extracted value.
+    """
+    # Verify period exists
+    period = db.query(PeriodModel).filter(PeriodModel.id == period_id).first()
+    if not period:
+        raise HTTPException(status_code=404, detail="Period not found")
+    
+    # Check file size
+    max_size_bytes = settings.max_file_size_mb * 1024 * 1024
+    file.file.seek(0, 2)
+    size = file.file.tell()
+    file.file.seek(0)
+    if size > max_size_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File size exceeds maximum allowed size of {settings.max_file_size_mb}MB"
+        )
+    
+    # Read file and extract tags
+    file_bytes = await file.read()
+    filename = (file.filename or "").lower()
+    
+    if not filename.endswith(('.xlsx', '.xls', '.csv')):
+        raise HTTPException(
+            status_code=400,
+            detail="File must be Excel (.xlsx, .xls) or CSV (.csv) format"
+        )
+    
+    extracted_tags, extraction_errors = extract_reconciliation_values(
+        file_bytes,
+        file.filename or "bulk_reconciliation",
+        period_id=period_id
+    )
+    
+    if not extracted_tags:
+        return {
+            "created_count": 0,
+            "validations": [],
+            "errors": extraction_errors or ["No reconciliation tags found in file"],
+            "tags_not_found": []
+        }
+    
+    # Find accounts matching the extracted tags
+    tags_list = list(extracted_tags.keys())
+    accounts = db.query(TrialBalanceAccountModel).options(
+        selectinload(TrialBalanceAccountModel.trial_balance),
+        selectinload(TrialBalanceAccountModel.tasks)
+    ).filter(
+        TrialBalanceAccountModel.reconciliation_tag.in_(tags_list)
+    ).all()
+    
+    # Map tags to accounts
+    tag_to_account = {account.reconciliation_tag: account for account in accounts}
+    
+    # Parse file date if provided
+    parsed_file_date = None
+    if file_date:
+        try:
+            parsed_file_date = datetime.fromisoformat(file_date).date()
+        except ValueError:
+            parsed_file_date = None
+    
+    # Create validations
+    created_validations = []
+    tags_not_found = []
+    
+    for tag, value in extracted_tags.items():
+        account = tag_to_account.get(tag)
+        
+        if not account:
+            tags_not_found.append(tag)
+            continue
+        
+        # Store a copy of the file for each validation
+        stored_filename, file_path, relative_path = _store_validation_file(
+            account.trial_balance_id,
+            account.id,
+            file.filename or "bulk_support",
+            file_bytes
+        )
+        
+        # Compute metrics
+        _, difference, matches = _compute_validation_metrics(account, value)
+        
+        # Check if there's a validation task linked to this account
+        validation_task = None
+        if account.tasks:
+            validation_tasks = [t for t in account.tasks if t.task_type == TaskType.VALIDATION]
+            if validation_tasks:
+                validation_task = validation_tasks[0]
+        
+        validation = TrialBalanceValidationModel(
+            account_id=account.id,
+            task_id=validation_task.id if validation_task else None,
+            supporting_amount=value,
+            difference=difference,
+            matches_balance=matches,
+            notes=notes,
+            evidence_filename=stored_filename,
+            evidence_original_filename=file.filename,
+            evidence_path=file_path,
+            evidence_relative_path=relative_path,
+            evidence_size=len(file_bytes),
+            evidence_mime_type=file.content_type,
+            evidence_file_date=parsed_file_date
+        )
+        db.add(validation)
+        
+        # Sync validation data to task if found
+        if validation_task:
+            validation_task.validation_amount = value
+            validation_task.validation_difference = difference
+            validation_task.validation_matches = matches
+            if notes:
+                validation_task.validation_notes = notes
+        created_validations.append({
+            "account_id": account.id,
+            "account_number": account.account_number,
+            "account_name": account.account_name,
+            "tag": tag,
+            "extracted_value": float(value),
+            "difference": float(difference),
+            "matches": matches
+        })
+    
+    db.commit()
+    
+    return {
+        "created_count": len(created_validations),
+        "validations": created_validations,
+        "errors": extraction_errors,
+        "tags_not_found": tags_not_found,
+        "total_tags_found": len(extracted_tags)
+    }
 
 
 @router.post("/accounts/{account_id}/attachments/upload", response_model=TrialBalanceAttachment, status_code=status.HTTP_201_CREATED)
@@ -1427,3 +1668,34 @@ async def get_missing_task_suggestions(
             ))
 
     return suggestions
+
+
+@router.get("/accounts/{account_id}/tag", response_model=dict)
+async def get_account_reconciliation_tag(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """
+    Get the reconciliation tag for a trial balance account.
+    
+    This tag can be embedded in reconciliation spreadsheets to enable
+    automatic value extraction.
+    """
+    account = db.query(TrialBalanceAccountModel).filter(
+        TrialBalanceAccountModel.id == account_id
+    ).first()
+    
+    if not account:
+        raise HTTPException(status_code=404, detail="Trial balance account not found")
+    
+    return {
+        "account_id": account.id,
+        "account_number": account.account_number,
+        "account_name": account.account_name,
+        "reconciliation_tag": account.reconciliation_tag,
+        "instructions": (
+            "Add this tag to the right of the reconciliation balance in your spreadsheet. "
+            "The system will automatically extract the value from the cell to the left of the tag."
+        )
+    }

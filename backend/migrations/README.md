@@ -75,6 +75,59 @@ DROP INDEX IF EXISTS idx_files_period_id;
 
 **Warning:** Rolling back will delete all period-level files that have no task association!
 
+## Available Migrations
+
+### 1. Add Reconciliation Tags
+**File**: `add_reconciliation_tags.sql`
+**Script**: `migrate_add_reconciliation_tags.py`
+
+**Purpose**: Add reconciliation tag support for automatic value extraction from Excel/CSV files
+
+**Changes**:
+- Adds `reconciliation_tag` column to `trial_balance_accounts` table
+- Generates unique tags for existing accounts (format: TB-{period_id}-{account_number})
+- Creates unique constraint and index for efficient tag lookups
+
+**Usage**:
+```bash
+python backend/migrations/migrate_add_reconciliation_tags.py
+```
+
+**Rollback**:
+```bash
+python backend/migrations/migrate_add_reconciliation_tags.py --rollback
+```
+
+### 2. Add Workflow Support
+**File**: `add_workflow_support.sql`
+**Script**: `migrate_add_workflow_support.py`
+
+**Purpose**: Add workflow visualization support with task positioning
+
+### 3. Add Period Files Support
+**File**: `add_period_files_support.sql`
+**Script**: `migrate_add_period_files.py`
+
+**Purpose**: Add period-level file uploads
+
+### 4. Add Task Validation and Review Fields
+**File**: `add_task_validation_and_review_fields.sql`
+**Script**: `migrate_add_task_validation_review.py`
+
+**Purpose**: Add task type, validation fields, and review tracking
+
+### 5. Add Performance Indexes
+**File**: `add_performance_indexes.sql`
+**Script**: `migrate_add_performance_indexes.py`
+
+**Purpose**: Add database indexes for improved query performance
+
+### 6. Add Reconciliation Workflow
+**File**: `add_reconciliation_workflow.sql`
+**Script**: `migrate_add_reconciliation_workflow.py`
+
+**Purpose**: Add trial balance reconciliation and validation workflow
+
 ## Notes
 
 - Always backup your database before running migrations

@@ -103,7 +103,7 @@ async def get_dashboard_stats(
         avg_time_to_complete = total_hours / len(completed_with_times)
     
     def to_summary(task: TaskModel) -> TaskSummary:
-        return TaskSummary(id=task.id, name=task.name, status=task.status, due_date=task.due_date)
+        return TaskSummary(id=task.id, name=task.name, status=task.status, task_type=task.task_type, due_date=task.due_date)
 
     blocked_tasks = [to_summary(t) for t in tasks if t.status == TaskStatus.BLOCKED]
     review_tasks = [to_summary(t) for t in tasks if t.status == TaskStatus.REVIEW]
@@ -134,6 +134,7 @@ async def get_dashboard_stats(
                 TaskModel.id.label("dependent_id"),
                 TaskModel.name.label("dependent_name"),
                 TaskModel.status.label("dependent_status"),
+                TaskModel.task_type.label("dependent_task_type"),
                 TaskModel.due_date.label("dependent_due"),
             )
             .join(TaskModel, TaskModel.id == task_dependencies.c.task_id)
@@ -154,6 +155,7 @@ async def get_dashboard_stats(
                     id=row.dependent_id,
                     name=row.dependent_name,
                     status=dependent_status,
+                    task_type=row.dependent_task_type,
                     due_date=row.dependent_due,
                 )
             )

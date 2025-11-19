@@ -11,6 +11,8 @@ import {
   Calendar,
   BookmarkPlus,
   Loader,
+  Copy,
+  Check,
 } from 'lucide-react'
 import api from '../lib/api'
 import { formatDate, getDateFromDaysOffset, type PeriodDateContext } from '../lib/utils'
@@ -35,6 +37,7 @@ interface AccountSummaryTask {
   id: number
   name: string
   status: string
+  task_type: 'prep' | 'validation'
 }
 
 interface Validation {
@@ -67,6 +70,7 @@ interface TrialBalanceAccountModalProps {
     debit?: number
     credit?: number
     ending_balance?: number
+    reconciliation_tag?: string
     notes?: string
     is_verified: boolean
     tasks: AccountSummaryTask[]
@@ -126,6 +130,7 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
   const [validationFile, setValidationFile] = useState<File | null>(null)
   const [validationError, setValidationError] = useState('')
   const [validationFileDate, setValidationFileDate] = useState('')
+  const [tagCopied, setTagCopied] = useState(false)
   const [newTaskName, setNewTaskName] = useState(`${account.account_name} Task`)
   const [newTaskDescription, setNewTaskDescription] = useState('')
   const [newTaskOwnerId, setNewTaskOwnerId] = useState<number | ''>('')
@@ -280,7 +285,16 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
       })
       return response.data
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // Show extraction results if auto-extracted
+      if (data.auto_extracted) {
+        console.log(`✓ Automatically extracted value from file using tag ${data.reconciliation_tag}`)
+      }
+      
+      if (data.extraction_errors && data.extraction_errors.length > 0) {
+        console.warn('Extraction warnings:', data.extraction_errors)
+      }
+      
       onRefetch()
       setValidationTaskId('')
       setValidationAmount(account.ending_balance !== undefined && account.ending_balance !== null ? account.ending_balance.toString() : '')
@@ -350,6 +364,18 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
       notes,
       is_verified: isVerified,
     })
+  }
+
+  const handleCopyTag = async () => {
+    if (account.reconciliation_tag) {
+      try {
+        await navigator.clipboard.writeText(account.reconciliation_tag)
+        setTagCopied(true)
+        setTimeout(() => setTagCopied(false), 2000)
+      } catch (err) {
+        console.error('Failed to copy tag:', err)
+      }
+    }
   }
 
   const handleToggleVerified = () => {
@@ -429,14 +455,20 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
   const userOptions = useMemo(() => usersQuery.data ?? [], [usersQuery.data])
 
   const handleValidationSubmit = () => {
-    if (!validationAmount || validationAmount.trim() === '') {
-      setValidationError('Enter an amount to validate against the trial balance')
+    // Allow submission if either amount is provided OR file is uploaded (for auto-extraction)
+    if ((!validationAmount || validationAmount.trim() === '') && !validationFile) {
+      setValidationError('Either provide an amount or upload an Excel/CSV file with the reconciliation tag')
       return
     }
 
     setValidationError('')
     const formData = new FormData()
-    formData.append('supporting_amount', validationAmount)
+    
+    // Supporting amount is optional if file is provided (auto-extraction will handle it)
+    if (validationAmount && validationAmount.trim() !== '') {
+      formData.append('supporting_amount', validationAmount)
+    }
+    
     if (validationNotes) {
       formData.append('notes', validationNotes)
     }
@@ -583,6 +615,42 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
               </div>
             </div>
           </div>
+
+          {account.reconciliation_tag && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <h3 className="text-sm font-semibold text-blue-900 mb-1">Reconciliation Tag</h3>
+                  <p className="text-xs text-blue-700 mb-2">
+                    Add this tag to the right of the reconciliation balance in your Excel/CSV spreadsheet. 
+                    The system will automatically extract the value from the cell to the left of the tag.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <code className="bg-white px-3 py-2 rounded border border-blue-300 text-sm font-mono text-blue-900">
+                      {account.reconciliation_tag}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={handleCopyTag}
+                      className="inline-flex items-center gap-1 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors text-sm font-medium"
+                    >
+                      {tagCopied ? (
+                        <>
+                          <Check className="w-4 h-4" />
+                          Copied!
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-4 h-4" />
+                          Copy Tag
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="border border-gray-200 rounded-lg p-4">
             <div className="flex items-center justify-between mb-3">
@@ -832,7 +900,7 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
               >
                 {taskOptions.map((task) => (
                   <option key={task.id} value={task.id}>
-                    {task.name} ({task.status})
+                    {task.name} ({task.status}){task.task_type === 'validation' ? ' [Validation]' : ''}
                   </option>
                 ))}
               </select>
@@ -867,7 +935,18 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
                         </p>
                       </div>
                       <div className="text-xs text-gray-500 mt-1">
-                        {validation.task ? `Task: ${validation.task.name} (${validation.task.status})` : 'No task linked'}
+                        {validation.task ? (
+                          <>
+                            Task: {validation.task.name} ({validation.task.status})
+                            {validation.task.task_type === 'validation' && (
+                              <span className="ml-2 px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">
+                                Validation
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          'No task linked'
+                        )}
                       </div>
                       {validation.notes && (
                         <p className="text-xs text-gray-600 mt-1">{validation.notes}</p>
@@ -924,20 +1003,33 @@ export default function TrialBalanceAccountModal({ periodId, account, onClose, o
                     <option value="">Select task (optional)</option>
                     {taskOptions.map((task) => (
                       <option key={task.id} value={task.id}>
-                        {task.name} ({task.status})
+                        {task.name} ({task.status}){task.task_type === 'validation' ? ' - Validation Task' : ''}
                       </option>
                     ))}
                   </select>
+                  {account.reconciliation_tag && (
+                    <p className="text-xs text-blue-600 mt-1">
+                      Validation tasks will be auto-linked when using tag extraction
+                    </p>
+                  )}
                 </div>
                 <div className="md:col-span-1">
-                  <label className="label text-xs">Supporting Amount *</label>
+                  <label className="label text-xs">
+                    Supporting Amount {account.reconciliation_tag && validationFile ? '(optional if file has tag)' : '*'}
+                  </label>
                   <input
                     type="number"
                     step="0.01"
                     className="input"
                     value={validationAmount}
                     onChange={(event) => setValidationAmount(event.target.value)}
+                    placeholder={account.reconciliation_tag && validationFile ? 'Auto-extracted from file' : ''}
                   />
+                  {account.reconciliation_tag && validationFile && (
+                    <p className="text-xs text-blue-600 mt-1">
+                      Value will be auto-extracted from Excel/CSV if tag {account.reconciliation_tag} is found
+                    </p>
+                  )}
                 </div>
                 <div className="md:col-span-1">
                   <label className="label text-xs">Notes</label>

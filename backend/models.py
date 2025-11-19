@@ -294,6 +294,9 @@ class TrialBalanceAccount(Base):
     credit = Column(Numeric(18, 2), nullable=True)
     ending_balance = Column(Numeric(18, 2), nullable=True)
 
+    # Reconciliation tag for automatic value extraction from Excel/CSV files
+    reconciliation_tag = Column(String(50), unique=True, index=True, nullable=True)
+
     notes = Column(Text, nullable=True)
     is_verified = Column(Boolean, default=False, nullable=False)
     is_reviewed = Column(Boolean, default=False, nullable=False)

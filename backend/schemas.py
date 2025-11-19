@@ -195,6 +195,7 @@ class TaskSummary(BaseModel):
     id: int
     name: str
     status: TaskStatus
+    task_type: TaskType
     due_date: Optional[datetime] = None
     
     model_config = ConfigDict(from_attributes=True)
@@ -644,6 +645,7 @@ class TrialBalanceAccount(TrialBalanceAccountBase):
     debit: Optional[Decimal] = None
     credit: Optional[Decimal] = None
     ending_balance: Optional[Decimal] = None
+    reconciliation_tag: Optional[str] = None
     verified_at: Optional[datetime] = None
     verified_by_id: Optional[int] = None
     tasks: List[TaskSummary] = []

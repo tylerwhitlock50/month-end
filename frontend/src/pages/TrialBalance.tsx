@@ -41,7 +41,7 @@ interface TrialBalanceAttachment {
 
 interface TrialBalanceValidationItem {
   id: number
-  task?: { id: number; name: string; status: string }
+  task?: { id: number; name: string; status: string; task_type: 'prep' | 'validation' }
   task_id?: number
   supporting_amount: number
   difference: number
@@ -63,9 +63,10 @@ interface TrialBalanceAccount {
   ending_balance?: number
   debit?: number
   credit?: number
+  reconciliation_tag?: string
   is_verified: boolean
   notes?: string
-  tasks: Array<{ id: number; name: string; status: string }>
+  tasks: Array<{ id: number; name: string; status: string; task_type: 'prep' | 'validation' }>
   attachments: TrialBalanceAttachment[]
   validations: TrialBalanceValidationItem[]
 }
