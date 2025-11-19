@@ -2,23 +2,26 @@
 
 ## Quick Start - Run All Migrations
 
-### On Windows:
+### From Your Host Machine (Windows):
 ```powershell
-.\run_migrations.bat
+.\run_all_migrations.bat
 ```
 
-### On Linux/Mac:
+### From Your Host Machine (Linux/Mac):
 ```bash
-chmod +x run_migrations.sh
-./run_migrations.sh
+chmod +x run_all_migrations.sh
+./run_all_migrations.sh
 ```
 
-### On Server (Docker):
+### From Inside the Container:
 ```bash
-# If you're SSH'd into your server, just run:
-./run_migrations.sh
+# If you're already exec'd into the backend container:
+bash /app/run_migrations.sh
+```
 
-# Or manually:
+### Manual (One by One):
+```bash
+# Run each migration manually:
 docker-compose exec backend python migrations/migrate_add_reconciliation_workflow.py
 docker-compose exec backend python migrations/migrate_add_task_validation_review.py
 docker-compose exec backend python migrations/migrate_add_workflow_support.py

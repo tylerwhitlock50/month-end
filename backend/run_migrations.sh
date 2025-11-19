@@ -23,7 +23,7 @@ MIGRATIONS=(
 # Run each migration
 for migration in "${MIGRATIONS[@]}"; do
     echo "📝 Running: $migration"
-    if docker-compose exec -T backend python migrations/$migration; then
+    if python migrations/$migration; then
         echo "✅ $migration completed"
         echo ""
     else
