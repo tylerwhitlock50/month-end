@@ -226,18 +226,29 @@ async def get_period_detail(
         if task.status == TaskStatus.COMPLETE:
             department_totals[department_key]["completed"] += 1
 
-    now = datetime.utcnow()
+    def _normalized_due_date(dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    now = datetime.now(timezone.utc)
     upcoming_cutoff = now + timedelta(days=3)
 
     overdue_tasks = [
         TaskSummary(id=task.id, name=task.name, status=task.status, task_type=task.task_type, due_date=task.due_date)
         for task in tasks
-        if task.status != TaskStatus.COMPLETE and task.due_date and task.due_date < now
+        if task.status != TaskStatus.COMPLETE
+        and _normalized_due_date(task.due_date) is not None
+        and _normalized_due_date(task.due_date) < now
     ]
     upcoming_tasks = [
         TaskSummary(id=task.id, name=task.name, status=task.status, task_type=task.task_type, due_date=task.due_date)
         for task in tasks
-        if task.status != TaskStatus.COMPLETE and task.due_date and now <= task.due_date <= upcoming_cutoff
+        if task.status != TaskStatus.COMPLETE
+        and _normalized_due_date(task.due_date) is not None
+        and now <= _normalized_due_date(task.due_date) <= upcoming_cutoff
     ]
 
     department_breakdown = [
@@ -591,4 +602,3 @@ async def delete_period(
     db.delete(period)
     db.commit()
     return None
-

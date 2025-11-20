@@ -18,6 +18,7 @@ type TemplateOption = {
   name: string
   description?: string
   department?: string
+  task_type?: 'prep' | 'validation'
   default_owner_id?: number
   days_offset?: number
   estimated_hours?: number
@@ -46,6 +47,8 @@ export default function QuickTaskModal({
   const [priority, setPriority] = useState(5)
   const [daysOffset, setDaysOffset] = useState('0')
   const [templateName, setTemplateName] = useState('')
+  const [templateNameTouched, setTemplateNameTouched] = useState(false)
+  const [taskType, setTaskType] = useState<'prep' | 'validation'>('prep')
   const [templateDepartment, setTemplateDepartment] = useState('Accounting')
   const [estimatedHours, setEstimatedHours] = useState('0.25')
   const [accountTags, setAccountTags] = useState('')
@@ -61,12 +64,20 @@ export default function QuickTaskModal({
     setPriority(5)
     setDaysOffset('0')
     setTemplateName(`${accountName} Task Template`)
+    setTemplateNameTouched(false)
+    setTaskType('prep')
     setTemplateDepartment('Accounting')
     setEstimatedHours('0.25')
     setAccountTags(accountNumber || '')
     setTemplateId('')
     setError('')
   }, [accountId, accountName, accountNumber])
+
+  useEffect(() => {
+    if (!templateNameTouched) {
+      setTemplateName(taskName)
+    }
+  }, [taskName, templateNameTouched])
 
   const { data: users } = useQuery({
     queryKey: ['users'],
@@ -110,6 +121,7 @@ export default function QuickTaskModal({
     if (template.default_owner_id) {
       setOwnerId(template.default_owner_id)
     }
+    setTaskType(template.task_type || 'prep')
     const nextDepartment = template.department || 'Accounting'
     setDepartment(nextDepartment)
     setTemplateDepartment(nextDepartment)
@@ -130,6 +142,7 @@ export default function QuickTaskModal({
       description?: string
       owner_id: number
       assignee_id?: number
+      task_type?: 'prep' | 'validation'
       status: string
       priority?: number
       department?: string
@@ -201,6 +214,7 @@ export default function QuickTaskModal({
       description?: string
       owner_id: number
       assignee_id?: number
+      task_type?: 'prep' | 'validation'
       status: string
       priority?: number
       department?: string
@@ -222,6 +236,7 @@ export default function QuickTaskModal({
       save_as_template: true,
       template_name: templateName.trim(),
       template_department: templateDepartment.trim() || undefined,
+      task_type: taskType,
     }
 
     if (estimatedHoursValue !== undefined && !Number.isNaN(estimatedHoursValue)) {
@@ -331,6 +346,22 @@ export default function QuickTaskModal({
               />
             </div>
             <div>
+              <label className="label">Task Type</label>
+              <select
+                className="input"
+                value={taskType}
+                onChange={(e) =>
+                  setTaskType(e.target.value === 'validation' ? 'validation' : 'prep')
+                }
+              >
+                <option value="prep">Preparation</option>
+                <option value="validation">Reconciliation / Validation</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                Use reconciliation to capture validation tasks that link with reconciliation tags.
+              </p>
+            </div>
+            <div>
               <label className="label">Priority (1-10)</label>
               <input
                 type="number"
@@ -385,7 +416,10 @@ export default function QuickTaskModal({
                   type="text"
                   className="input"
                   value={templateName}
-                  onChange={(e) => setTemplateName(e.target.value)}
+                  onChange={(e) => {
+                    setTemplateName(e.target.value)
+                    setTemplateNameTouched(true)
+                  }}
                   placeholder="e.g., Cash reconciliation template"
                 />
               </div>

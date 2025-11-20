@@ -16,6 +16,8 @@ import {
   ArrowRight,
   UserCheck,
   Trash2,
+  Copy,
+  CheckCircle,
 } from 'lucide-react'
 import api, { API_URL } from '../lib/api'
 import { formatDate, formatDateTime, getStatusLabel, getStatusColor, getNextStatusInFlow, getAdvanceStatusLabel } from '../lib/utils'
@@ -41,6 +43,7 @@ interface TaskResponse {
   description?: string
   notes?: string
   status: string
+  task_type?: 'prep' | 'validation'
   due_date?: string
   owner_id: number
   assignee_id?: number
@@ -50,6 +53,12 @@ interface TaskResponse {
   assignee?: { id: number; name: string }
   dependency_details?: DependencySummary[]
   dependent_details?: DependencySummary[]
+  trial_balance_accounts?: Array<{
+    id: number
+    account_number: string
+    account_name: string
+    reconciliation_tag?: string
+  }>
 }
 
 interface TaskFile {
@@ -71,6 +80,8 @@ interface TaskUpdateForm {
   assignee_id?: number | ''
   due_date?: string
   priority?: number
+  validation_amount?: number
+  validation_notes?: string
 }
 
 interface PriorTaskFile {
@@ -154,6 +165,7 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
   const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [selectedReviewerId, setSelectedReviewerId] = useState<number | ''>('')
+  const [copiedTagId, setCopiedTagId] = useState<number | null>(null)
 
   const { data: taskData, isLoading: taskLoading, refetch: refetchTask } = useQuery<TaskResponse>({
     queryKey: ['task', taskId],
@@ -482,6 +494,22 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
     window.open(`/tasks?highlight=${targetTaskId}`, '_blank')
   }
 
+  const linkedAccounts = taskData?.trial_balance_accounts ?? []
+
+  const handleCopyTag = useCallback(
+    async (tag: string, accountId: number) => {
+      if (!tag) return
+      try {
+        await navigator.clipboard.writeText(tag)
+        setCopiedTagId(accountId)
+        setTimeout(() => setCopiedTagId(null), 2000)
+      } catch (error) {
+        console.error('Failed to copy reconciliation tag', error)
+      }
+    },
+    []
+  )
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -521,14 +549,62 @@ export default function TaskDetailModal({ taskId, onClose, onUpdated }: TaskDeta
               </div>
             </section>
 
-            {/* Validation Amount (for validation tasks) */}
-            {taskData?.task_type === 'validation' && (
+            {/* Reconciliation tags + validation fields */}
+            {(taskData?.task_type === 'validation' || linkedAccounts.length > 0) && (
               <section className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                 <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
                   <CheckCircle className="w-4 h-4 text-blue-600" />
-                  Validation Amount
+                  Validation / Reconciliation Details
                 </h3>
-                <div className="grid gap-4 md:grid-cols-2">
+
+                <div className="space-y-3">
+                  {linkedAccounts.length === 0 ? (
+                    <p className="text-xs text-blue-900 bg-white border border-blue-100 rounded-md px-3 py-2">
+                      Link this task to a trial balance account to surface its reconciliation tag. The tag lives to the right of your balance; we read the value immediately to the left when scanning Excel/CSV uploads.
+                    </p>
+                  ) : (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {linkedAccounts.map((account) => (
+                        <div key={account.id} className="bg-white border border-blue-100 rounded-md px-3 py-2">
+                          <p className="text-xs font-semibold text-gray-900">
+                            {account.account_number} · {account.account_name}
+                          </p>
+                          {account.reconciliation_tag ? (
+                            <div className="mt-2 flex items-center justify-between gap-2">
+                              <span className="font-mono text-sm text-blue-700">
+                                {account.reconciliation_tag}
+                              </span>
+                              <button
+                                type="button"
+                                className="text-xs text-blue-700 hover:text-blue-800 inline-flex items-center gap-1"
+                                onClick={() => handleCopyTag(account.reconciliation_tag!, account.id)}
+                              >
+                                {copiedTagId === account.id ? (
+                                  <>
+                                    <CheckCircle2 className="w-3 h-3" />
+                                    Copied
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3 h-3" />
+                                    Copy
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-gray-500 mt-1">No reconciliation tag available.</p>
+                          )}
+                          <p className="text-[11px] text-gray-600 mt-2">
+                            Place this tag to the right of your reconciliation balance. We read the value immediately to the left when scanning Excel or CSV uploads.
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
                   <div>
                     <label className="label text-sm">Validation Amount *</label>
                     <input

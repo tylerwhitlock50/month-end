@@ -35,6 +35,7 @@ from backend.models import (
     File as FileModel,
     Approval as ApprovalModel,
     TaskStatus,
+    TaskType,
     ApprovalStatus,
 )
 from backend.schemas import (
@@ -902,6 +903,7 @@ async def create_account_task(
         due_date_value = _calculate_due_date_from_offset(period, effective_days_offset)
 
     new_task = TaskModel(
+        task_type=payload.task_type or (template.task_type if template else TaskType.PREP),
         period_id=period.id,
         name=payload.name,
         description=task_description,
@@ -937,6 +939,7 @@ async def create_account_task(
             name=payload.template_name or payload.name,
             description=payload.description,
             close_type=period.close_type,
+            task_type=payload.task_type or TaskType.PREP,
             default_owner_id=payload.owner_id,
             department=payload.template_department or normalized_department,
             days_offset=_calculate_template_offset(period, due_date_value),

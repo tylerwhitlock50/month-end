@@ -21,7 +21,8 @@ from backend.models import (
     TaskStatus,
     TaskType,
     UserRole,
-    task_dependencies
+    task_dependencies,
+    TrialBalanceAccount as TBAccountModel,
 )
 from backend.schemas import (
     Task,
@@ -143,6 +144,15 @@ def _map_task_to_summary(task: TaskModel) -> TaskSummary:
     )
 
 
+def _map_task_account(account: TBAccountModel) -> dict:
+    return {
+        "id": account.id,
+        "account_number": account.account_number,
+        "account_name": account.account_name,
+        "reconciliation_tag": account.reconciliation_tag,
+    }
+
+
 @router.get("/", response_model=List[TaskWithRelations])
 async def get_tasks(
     skip: int = 0,
@@ -157,7 +167,7 @@ async def get_tasks(
     current_user: UserModel = Depends(get_current_user)
 ):
     """Get tasks with optional filters."""
-    query = db.query(TaskModel).join(PeriodModel)
+    query = db.query(TaskModel).options(selectinload(TaskModel.trial_balance_accounts)).join(PeriodModel)
 
     if period_id:
         query = query.filter(TaskModel.period_id == period_id)
@@ -204,6 +214,7 @@ async def get_tasks(
             "dependencies": dependency_ids,
             "dependency_details": dependency_details,
             "dependent_details": dependent_details,
+            "trial_balance_accounts": [_map_task_account(account) for account in task.trial_balance_accounts],
         }
         result.append(task_dict)
     
@@ -332,7 +343,12 @@ async def get_task(
     current_user: UserModel = Depends(get_current_user)
 ):
     """Get a specific task by ID."""
-    task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
+    task = (
+        db.query(TaskModel)
+        .options(selectinload(TaskModel.trial_balance_accounts))
+        .filter(TaskModel.id == task_id)
+        .first()
+    )
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
@@ -356,6 +372,7 @@ async def get_task(
         "dependencies": dependency_ids,
         "dependency_details": dependency_details,
         "dependent_details": dependent_details,
+        "trial_balance_accounts": [_map_task_account(account) for account in task.trial_balance_accounts],
     }
 
 

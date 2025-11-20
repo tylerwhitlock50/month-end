@@ -172,11 +172,13 @@ def estimate_zip_size(db: Session, period_id: int) -> int:
     total_size += sum(f.file_size for f in task_files if not f.is_external_link)
     
     # Trial balance attachments
-    tb_attachments = db.query(TrialBalanceAttachmentModel).join(
-        TrialBalanceModel.accounts
-    ).join(TrialBalanceModel).filter(
-        TrialBalanceModel.period_id == period_id
-    ).all()
+    tb_attachments = (
+        db.query(TrialBalanceAttachmentModel)
+        .join(TrialBalanceAccountModel, TrialBalanceAttachmentModel.account_id == TrialBalanceAccountModel.id)
+        .join(TrialBalanceModel, TrialBalanceAccountModel.trial_balance_id == TrialBalanceModel.id)
+        .filter(TrialBalanceModel.period_id == period_id)
+        .all()
+    )
     total_size += sum(a.file_size for a in tb_attachments if not a.is_external_link)
     
     return total_size

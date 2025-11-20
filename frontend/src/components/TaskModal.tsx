@@ -17,6 +17,7 @@ interface TaskForm {
   due_date?: string
   department: string
   priority: number
+  task_type?: 'prep' | 'validation'
 }
 
 export default function TaskModal({ onClose, onSuccess, task }: TaskModalProps) {
@@ -51,6 +52,7 @@ export default function TaskModal({ onClose, onSuccess, task }: TaskModalProps) 
   const onSubmit = (data: TaskForm) => {
     const payload: TaskForm = {
       ...data,
+      task_type: data.task_type || 'prep',
       due_date: data.due_date ? data.due_date : undefined,
     }
     createMutation.mutate(payload)
@@ -150,6 +152,19 @@ export default function TaskModal({ onClose, onSuccess, task }: TaskModalProps) 
                 className="input"
                 placeholder="e.g., Accounting"
               />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Task Type</label>
+              <select {...register('task_type')} className="input">
+                <option value="prep">Preparation</option>
+                <option value="validation">Reconciliation / Validation</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                Use reconciliation for validation tasks that will use tags to auto-extract amounts.
+              </p>
             </div>
           </div>
 

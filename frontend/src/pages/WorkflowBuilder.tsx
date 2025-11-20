@@ -29,6 +29,7 @@ import {
   CheckCircle,
   Filter,
   Loader2,
+  X,
 } from 'lucide-react'
 
 import { useWorkflowStore } from '../stores/workflowStore'
@@ -87,6 +88,7 @@ export default function WorkflowBuilder() {
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [apiNodes, setApiNodes] = useState<ApiWorkflowNode[]>([])
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null)
 
   // Fetch workflow data
   const { data: workflowData, isLoading, refetch } = useQuery({
@@ -122,6 +124,7 @@ export default function WorkflowBuilder() {
       setEdges(reactFlowEdges)
       setApiNodes(workflowData.nodes)
       markClean()
+      setSelectedNodeId(null)
     }
   }, [workflowData, setNodes, setEdges, markClean])
 
@@ -230,6 +233,29 @@ export default function WorkflowBuilder() {
     [apiNodes, saveDependenciesMutation]
   )
 
+  // Remove a connection from UI or context menu
+  const handleRemoveConnection = useCallback(
+    (sourceId: number, targetId: number) => {
+      const targetNode = apiNodes.find((n) => n.id === targetId)
+      if (!targetNode) return
+
+      const newDependencies = targetNode.dependency_ids.filter((id) => id !== sourceId)
+      setEdges((eds) =>
+        eds.filter((edge) => !(parseInt(edge.source) === sourceId && parseInt(edge.target) === targetId))
+      )
+      setApiNodes((prev) =>
+        prev.map((node) =>
+          node.id === targetId ? { ...node, dependency_ids: newDependencies } : node
+        )
+      )
+      saveDependenciesMutation.mutate({
+        nodeId: targetId,
+        dependencyIds: newDependencies,
+      })
+    },
+    [apiNodes, saveDependenciesMutation, setEdges, setApiNodes]
+  )
+
   // Auto-layout button handler
   const handleAutoLayout = useCallback(() => {
     const layoutedNodes = autoLayoutNodes(nodes, edges)
@@ -249,6 +275,17 @@ export default function WorkflowBuilder() {
   const stats = useMemo(() => {
     return getWorkflowStats(apiNodes, workflowData?.edges || [])
   }, [apiNodes, workflowData])
+
+  const selectedNode = useMemo(
+    () => (selectedNodeId ? apiNodes.find((n) => n.id === selectedNodeId) || null : null),
+    [apiNodes, selectedNodeId]
+  )
+  const selectedDependencies = useMemo(() => {
+    if (!selectedNode) return []
+    return selectedNode.dependency_ids
+      .map((id) => apiNodes.find((n) => n.id === id))
+      .filter(Boolean) as ApiWorkflowNode[]
+  }, [selectedNode, apiNodes])
 
   // Sync selected period with global period store
   useEffect(() => {
@@ -394,6 +431,51 @@ export default function WorkflowBuilder() {
             <div className="text-sm text-red-700">{saveError}</div>
           </div>
         )}
+
+        {selectedNode && (
+          <div className="mt-3 p-3 bg-white border border-gray-200 rounded-lg shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">
+                  Connections for {selectedNode.name}
+                </p>
+                <p className="text-xs text-gray-600">
+                  Right-click a connection line or remove a link below to fix a missed step.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedNodeId(null)}
+                className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
+              >
+                <X className="w-3 h-3" />
+                Clear
+              </button>
+            </div>
+
+            {selectedDependencies.length === 0 ? (
+              <p className="text-xs text-gray-600 mt-2">No upstream connections.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {selectedDependencies.map((dep) => (
+                  <span
+                    key={dep.id}
+                    className="inline-flex items-center gap-2 px-3 py-1 text-xs bg-gray-100 text-gray-800 rounded-full border border-gray-200"
+                  >
+                    {dep.name}
+                    <button
+                      type="button"
+                      className="text-gray-500 hover:text-red-600"
+                      onClick={() => handleRemoveConnection(dep.id, selectedNode.id)}
+                    >
+                      Remove
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Canvas */}
@@ -428,6 +510,12 @@ export default function WorkflowBuilder() {
             onConnect={onConnect}
             onNodeDragStop={onNodeDragStop}
             onEdgesDelete={onEdgesDelete}
+            onNodeClick={(_event, node) => setSelectedNodeId(parseInt(node.id))}
+            onPaneClick={() => setSelectedNodeId(null)}
+            onEdgeContextMenu={(event, edge) => {
+              event.preventDefault()
+              handleRemoveConnection(parseInt(edge.source), parseInt(edge.target))
+            }}
             nodeTypes={nodeTypes}
             fitView
             fitViewOptions={{ padding: 0.2 }}

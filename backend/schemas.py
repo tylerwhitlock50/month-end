@@ -203,6 +203,15 @@ class TaskSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class TrialBalanceAccountLink(BaseModel):
+    id: int
+    account_number: str
+    account_name: str
+    reconciliation_tag: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class TaskWithRelations(Task):
     owner: User
     assignee: Optional[User] = None
@@ -212,6 +221,7 @@ class TaskWithRelations(Task):
     dependencies: List[int] = []
     dependency_details: List[TaskSummary] = []
     dependent_details: List[TaskSummary] = []
+    trial_balance_accounts: List[TrialBalanceAccountLink] = []
 
 
 class CriticalPathItem(BaseModel):
@@ -712,6 +722,7 @@ class TrialBalanceAccountTaskCreate(BaseModel):
     description: Optional[str] = None
     assignee_id: Optional[int] = None
     status: TaskStatus = TaskStatus.NOT_STARTED
+    task_type: Optional[TaskType] = None
     due_date: Optional[datetime] = None
     days_offset: Optional[int] = None
     priority: Optional[int] = Field(None, ge=1, le=10)

@@ -74,6 +74,14 @@ class Settings(BaseSettings):
         # Ensure we always return at least one origin to keep CORS middleware happy.
         return raw_origins or ["http://localhost:5173"]
 
+    @property
+    def local_origin_regex(self) -> str:
+        """
+        Allow common local network origins (localhost, 127.x, 0.0.0.0, and RFC1918 ranges)
+        so dev servers reachable by IP (e.g., 10.x.x.x:5173) pass CORS.
+        """
+        return r"http://(localhost|127\.0\.0\.1|0\.0\.0\.0|frontend|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3})(:\d+)?$"
+
 
 settings = Settings()
 
