@@ -6,6 +6,7 @@ import UserModal from '../components/UserModal'
 
 export default function Users() {
   const [showModal, setShowModal] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<any | null>(null)
 
   const { data: users, isLoading, refetch } = useQuery({
     queryKey: ['users'],
@@ -25,7 +26,10 @@ export default function Users() {
         </div>
         <button
           className="btn-primary flex items-center gap-2"
-          onClick={() => setShowModal(true)}
+          onClick={() => {
+            setSelectedUser(null)
+            setShowModal(true)
+          }}
         >
           <Plus className="w-5 h-5" />
           Add User
@@ -86,7 +90,15 @@ export default function Users() {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button className="text-primary-600 hover:text-primary-900">Edit</button>
+                    <button
+                      className="text-primary-600 hover:text-primary-900"
+                      onClick={() => {
+                        setSelectedUser(user)
+                        setShowModal(true)
+                      }}
+                    >
+                      Edit
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -97,9 +109,11 @@ export default function Users() {
 
       {showModal && (
         <UserModal
+          user={selectedUser}
           onClose={() => setShowModal(false)}
           onSuccess={() => {
             refetch()
+            setSelectedUser(null)
           }}
         />
       )}

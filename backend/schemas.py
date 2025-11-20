@@ -26,6 +26,7 @@ class UserUpdate(BaseModel):
     phone: Optional[str] = None
     slack_user_id: Optional[str] = None
     is_active: Optional[bool] = None
+    password: Optional[str] = Field(None, min_length=8)
 
 
 class User(UserBase):
